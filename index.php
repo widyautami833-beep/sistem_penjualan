@@ -1,15 +1,16 @@
 
 <?php
-session_start();
+require_once __DIR__ . '/../auth.php';
+wajibRole('pelanggan');
 
-/* =========================================
+/* =====================================================
    1. KONEKSI DATABASE
-========================================= */
+===================================================== */
 
-$host = "localhost";
-$dbname = "db_toko";
-$username = "root";
-$password = "";
+$host = 'localhost';
+$dbname = 'db_toko';
+$username = 'root';
+$password = '';
 
 try {
     $pdo = new PDO(
@@ -22,757 +23,602 @@ try {
         ]
     );
 } catch (PDOException $e) {
-    die("Koneksi database gagal: " . htmlspecialchars($e->getMessage()));
+    die('Koneksi database gagal.');
 }
 
-/* =========================================
-   2. MEMBUAT TABEL PRODUK DAN KATEGORI
-========================================= */
+/* =====================================================
+   2. HELPER
+===================================================== */
 
-$pdo->exec("
-    CREATE TABLE IF NOT EXISTS tbl_kategori (
-        id_kategori INT AUTO_INCREMENT PRIMARY KEY,
-        nama_kategori VARCHAR(100) NOT NULL,
-        deskripsi TEXT NULL
-    )
-");
-
-$pdo->exec("
-    CREATE TABLE IF NOT EXISTS tbl_produk (
-        id_produk INT AUTO_INCREMENT PRIMARY KEY,
-        nama_produk VARCHAR(150) NOT NULL,
-        id_kategori INT NOT NULL,
-        harga DECIMAL(15,2) NOT NULL DEFAULT 0,
-        stok INT NOT NULL DEFAULT 0,
-        FOREIGN KEY (id_kategori)
-            REFERENCES tbl_kategori(id_kategori)
-            ON UPDATE CASCADE
-    )
-");
-
-/* =========================================
-   3. FUNGSI BANTU
-========================================= */
-
-function e($value) {
+function e($value)
+{
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
-function rupiah($angka) {
-    return "Rp " . number_format((float)$angka, 0, ',', '.');
+function rupiah($angka)
+{
+    return 'Rp ' . number_format((float)$angka, 0, ',', '.');
 }
 
-function redirect($page = "dashboard") {
-    header("Location: index.php?page=" . urlencode($page));
+function redirectHalaman($halaman = 'dashboard')
+{
+    header("Location: index.php?halaman=" . urlencode($halaman));
     exit;
 }
 
-function activity($pdo, $idTransaksi, $pesan) {
-    try {
-        $stmt = $pdo->prepare("
-            INSERT INTO log_transaksi
-            (id_transaksi, aktivitas, waktu)
-            VALUES (?, ?, NOW())
-        ");
-        $stmt->execute([$idTransaksi, $pesan]);
-    } catch (PDOException $e) {
-        // Log tidak menggagalkan transaksi utama.
-    }
+function flash($pesan, $jenis = 'success')
+{
+    $_SESSION['flash_pelanggan'] = [
+        'pesan' => $pesan,
+        'jenis' => $jenis
+    ];
 }
 
-$page = $_GET['page'] ?? 'dashboard';
-$message = "";
-
-/* =========================================
-   4. PROSES CETAK STRUK DAN PDF
-========================================= */
-
-if (isset($_GET['struk'])) {
-
-    $idStruk = (int)$_GET['struk'];
-
-    $stmt = $pdo->prepare("
-        SELECT t.*, p.nama_pelanggan
-        FROM tbl_transaksi t
-        LEFT JOIN tbl_pelanggan p
-            ON t.id_pelanggan = p.id_pelanggan
-        WHERE t.id_transaksi = ?
-    ");
-
-    $stmt->execute([$idStruk]);
-    $dataStruk = $stmt->fetch();
-
-    if (!$dataStruk) {
-        die("Transaksi tidak ditemukan.");
-    }
-
-    $stmt = $pdo->prepare("
-        SELECT nama_produk, jumlah, harga
-        FROM tbl_detail_transaksi
-        WHERE id_transaksi = ?
-    ");
-
-    $stmt->execute([$idStruk]);
-    $detailStruk = $stmt->fetchAll();
-
-    $modePDF = isset($_GET['pdf']);
-    ?>
-
-    <!DOCTYPE html>
-    <html lang="id">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Struk StoreFlow</title>
-
-        <style>
-            * {
-                box-sizing: border-box;
-            }
-
-            body {
-                margin: 0;
-                padding: 30px;
-                background: #f1f5fb;
-                font-family: Arial, sans-serif;
-                color: #26364b;
-            }
-
-            .struk {
-                max-width: 550px;
-                margin: auto;
-                background: white;
-                padding: 30px;
-                border-radius: 12px;
-                box-shadow: 0 5px 25px #00000010;
-            }
-
-            .header {
-                text-align: center;
-                border-bottom: 2px dashed #ccd5e2;
-                padding-bottom: 20px;
-            }
-
-            .header h1 {
-                color: #3978d5;
-                margin: 0 0 8px;
-            }
-
-            .informasi {
-                margin: 20px 0;
-                line-height: 2;
-                font-size: 14px;
-            }
-
-            table {
-                width: 100%;
-                border-collapse: collapse;
-            }
-
-            th, td {
-                padding: 12px 5px;
-                text-align: left;
-                border-bottom: 1px solid #eee;
-                font-size: 13px;
-            }
-
-            .total {
-                text-align: right;
-                font-size: 20px;
-                font-weight: bold;
-                color: #3978d5;
-                margin-top: 25px;
-            }
-
-            .footer {
-                text-align: center;
-                margin-top: 30px;
-                color: #7c899b;
-                font-size: 13px;
-            }
-
-            .tombol {
-                max-width: 550px;
-                margin: 20px auto;
-                display: flex;
-                gap: 10px;
-            }
-
-            .tombol button,
-            .tombol a {
-                flex: 1;
-                padding: 12px;
-                border: none;
-                border-radius: 7px;
-                text-align: center;
-                text-decoration: none;
-                cursor: pointer;
-                font-size: 14px;
-            }
-
-            .cetak {
-                background: #3978d5;
-                color: white;
-            }
-
-            .kembali {
-                background: #e5edf8;
-                color: #26364b;
-            }
-
-            @media print {
-                body {
-                    padding: 0;
-                    background: white;
-                }
-
-                .struk {
-                    box-shadow: none;
-                    max-width: 100%;
-                }
-
-                .tombol {
-                    display: none;
-                }
-            }
-        </style>
-    </head>
-
-    <body>
-
-    <div class="struk">
-
-        <div class="header">
-            <h1>StoreFlow</h1>
-            <p>STRUK PEMBELIAN</p>
-            <small>Terima kasih telah berbelanja!</small>
-        </div>
-
-        <div class="informasi">
-            <strong>Nomor Transaksi:</strong>
-            #TRX-<?= e($dataStruk['id_transaksi']) ?><br>
-
-            <strong>Tanggal:</strong>
-            <?= e($dataStruk['tanggal']) ?><br>
-
-            <strong>Pelanggan:</strong>
-            <?= e($dataStruk['nama_pelanggan'] ?? '-') ?>
-        </div>
-
-        <table>
-            <thead>
-                <tr>
-                    <th>Produk</th>
-                    <th>Jumlah</th>
-                    <th>Harga</th>
-                    <th>Subtotal</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                <?php foreach ($detailStruk as $d): ?>
-                <tr>
-                    <td><?= e($d['nama_produk']) ?></td>
-                    <td><?= e($d['jumlah']) ?></td>
-                    <td><?= rupiah($d['harga']) ?></td>
-                    <td>
-                        <?= rupiah($d['harga'] * $d['jumlah']) ?>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-
-        <div class="total">
-            Total: <?= rupiah($dataStruk['total_belanja']) ?>
-        </div>
-
-        <div class="footer">
-            <p>Terima kasih atas kunjungan Anda.</p>
-            <strong>StoreFlow - Sistem Informasi Penjualan</strong>
-        </div>
-
-    </div>
-
-    <div class="tombol">
-        <button class="cetak" onclick="window.print()">
-            Cetak / Simpan PDF
-        </button>
-
-        <a href="index.php?page=aktivitas" class="kembali">
-            Kembali
-        </a>
-    </div>
-
-    <?php if ($modePDF): ?>
-    <script>
-        window.onload = function() {
-            window.print();
-        };
-    </script>
-    <?php endif; ?>
-
-    </body>
-    </html>
-
-    <?php
-    exit;
+function getFlash()
+{
+    $data = $_SESSION['flash_pelanggan'] ?? null;
+    unset($_SESSION['flash_pelanggan']);
+    return $data;
 }
 
-/* =========================================
-   5. PROSES TAMBAH / EDIT / HAPUS
-========================================= */
+/* =====================================================
+   3. CSRF TOKEN
+===================================================== */
+
+if (empty($_SESSION['csrf_pelanggan'])) {
+    $_SESSION['csrf_pelanggan'] = bin2hex(random_bytes(32));
+}
+
+$csrf = $_SESSION['csrf_pelanggan'];
+
+/* =====================================================
+   4. DATA AKUN PELANGGAN
+===================================================== */
+
+$idUser = (int)$_SESSION['user_id'];
+
+$stmt = $pdo->prepare("
+    SELECT
+        u.id,
+        u.username,
+        u.nama,
+        u.id_pelanggan,
+        p.nama_pelanggan,
+        p.kota
+    FROM users u
+    LEFT JOIN tbl_pelanggan p
+        ON u.id_pelanggan = p.id_pelanggan
+    WHERE u.id = ?
+      AND u.role = 'pelanggan'
+    LIMIT 1
+");
+
+$stmt->execute([$idUser]);
+$akun = $stmt->fetch();
+
+if (!$akun || empty($akun['id_pelanggan'])) {
+    die('Data pelanggan belum terhubung dengan akun.');
+}
+
+$idPelanggan = (int)$akun['id_pelanggan'];
+$namaPelanggan = $akun['nama_pelanggan'] ?: $akun['nama'];
+$inisial = strtoupper(substr($namaPelanggan, 0, 1));
+
+/* =====================================================
+   5. DETEKSI KOLOM DATABASE
+===================================================== */
+
+$kolomTransaksi = $pdo->query("
+    SHOW COLUMNS FROM tbl_transaksi
+")->fetchAll(PDO::FETCH_COLUMN);
+
+$kolomProduk = $pdo->query("
+    SHOW COLUMNS FROM tbl_produk
+")->fetchAll(PDO::FETCH_COLUMN);
+
+$kolomTransaksi = array_flip($kolomTransaksi);
+$kolomProduk = array_flip($kolomProduk);
+
+/* =====================================================
+   6. KERANJANG SESSION
+===================================================== */
+
+if (!isset($_SESSION['keranjang_pelanggan'])) {
+    $_SESSION['keranjang_pelanggan'] = [];
+}
+
+/* =====================================================
+   7. PROSES FORM
+===================================================== */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    $action = $_POST['action'] ?? '';
+    if (!hash_equals(
+        $_SESSION['csrf_pelanggan'] ?? '',
+        $_POST['csrf'] ?? ''
+    )) {
+        flash('Permintaan tidak valid. Silakan coba kembali.', 'error');
+        redirectHalaman('dashboard');
+    }
 
-    try {
+    $aksi = $_POST['aksi'] ?? '';
 
-        /* TAMBAH PELANGGAN */
-        if ($action === 'tambah_pelanggan') {
+    /* TAMBAH KE KERANJANG */
 
-            $nama = trim($_POST['nama_pelanggan']);
-            $kota = trim($_POST['kota']);
+    if ($aksi === 'tambah_keranjang') {
 
-            if ($nama === '' || $kota === '') {
-                throw new Exception("Nama dan kota harus diisi.");
+        $idProduk = (int)($_POST['id_produk'] ?? 0);
+        $jumlah = (int)($_POST['jumlah'] ?? 1);
+
+        if ($idProduk <= 0 || $jumlah <= 0) {
+            flash('Jumlah produk tidak valid.', 'error');
+            redirectHalaman('produk');
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT id_produk, nama_produk, harga, stok
+            FROM tbl_produk
+            WHERE id_produk = ?
+            LIMIT 1
+        ");
+
+        $stmt->execute([$idProduk]);
+        $item = $stmt->fetch();
+
+        if (!$item) {
+            flash('Produk tidak ditemukan.', 'error');
+            redirectHalaman('produk');
+        }
+
+        if ($item['stok'] <= 0) {
+            flash('Stok produk sedang habis.', 'error');
+            redirectHalaman('produk');
+        }
+
+        $jumlahSekarang = $_SESSION['keranjang_pelanggan'][$idProduk] ?? 0;
+        $jumlahBaru = $jumlahSekarang + $jumlah;
+
+        if ($jumlahBaru > (int)$item['stok']) {
+            flash('Jumlah melebihi stok yang tersedia.', 'error');
+            redirectHalaman('produk');
+        }
+
+        $_SESSION['keranjang_pelanggan'][$idProduk] = $jumlahBaru;
+
+        flash('Produk berhasil ditambahkan ke keranjang.');
+        redirectHalaman('produk');
+    }
+
+    /* UPDATE JUMLAH KERANJANG */
+
+    if ($aksi === 'update_keranjang') {
+
+        foreach ($_POST['jumlah'] ?? [] as $id => $jumlah) {
+
+            $id = (int)$id;
+            $jumlah = (int)$jumlah;
+
+            if ($id <= 0) {
+                continue;
+            }
+
+            if ($jumlah <= 0) {
+                unset($_SESSION['keranjang_pelanggan'][$id]);
+                continue;
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO tbl_pelanggan
-                (nama_pelanggan, kota)
-                VALUES (?, ?)
-            ");
-
-            $stmt->execute([$nama, $kota]);
-
-            $_SESSION['message'] = "Pelanggan berhasil ditambahkan.";
-            redirect('pelanggan');
-        }
-
-        /* EDIT PELANGGAN */
-        if ($action === 'edit_pelanggan') {
-
-            $stmt = $pdo->prepare("
-                UPDATE tbl_pelanggan
-                SET nama_pelanggan = ?, kota = ?
-                WHERE id_pelanggan = ?
-            ");
-
-            $stmt->execute([
-                trim($_POST['nama_pelanggan']),
-                trim($_POST['kota']),
-                (int)$_POST['id_pelanggan']
-            ]);
-
-            $_SESSION['message'] = "Pelanggan berhasil diperbarui.";
-            redirect('pelanggan');
-        }
-
-        /* HAPUS PELANGGAN */
-        if ($action === 'hapus_pelanggan') {
-
-            $id = (int)$_POST['id_pelanggan'];
-
-            $stmt = $pdo->prepare("
-                SELECT nama_pelanggan, kota
-                FROM tbl_pelanggan
-                WHERE id_pelanggan = ?
-            ");
-
-            $stmt->execute([$id]);
-            $dataPelanggan = $stmt->fetch();
-
-            if (!$dataPelanggan) {
-                throw new Exception("Pelanggan tidak ditemukan.");
-            }
-
-            $cek = $pdo->prepare("
-                SELECT COUNT(*)
-                FROM tbl_transaksi
-                WHERE id_pelanggan = ?
-            ");
-
-            $cek->execute([$id]);
-
-            if ($cek->fetchColumn() > 0) {
-                throw new Exception(
-                    "Pelanggan memiliki riwayat transaksi dan tidak dapat dihapus."
-                );
-            }
-
-            try {
-                $log = $pdo->prepare("
-                    INSERT INTO log_hapus_pelanggan
-                    (id_pelanggan, nama_pelanggan, kota, waktu_hapus)
-                    VALUES (?, ?, ?, NOW())
-                ");
-
-                $log->execute([
-                    $id,
-                    $dataPelanggan['nama_pelanggan'],
-                    $dataPelanggan['kota']
-                ]);
-            } catch (PDOException $e) {
-                // Tabel log boleh belum tersedia.
-            }
-
-            $stmt = $pdo->prepare("
-                DELETE FROM tbl_pelanggan
-                WHERE id_pelanggan = ?
-            ");
-
-            $stmt->execute([$id]);
-
-            $_SESSION['message'] = "Pelanggan berhasil dihapus.";
-            redirect('pelanggan');
-        }
-
-        /* TAMBAH KATEGORI */
-        if ($action === 'tambah_kategori') {
-
-            $nama = trim($_POST['nama_kategori']);
-            $deskripsi = trim($_POST['deskripsi']);
-
-            if ($nama === '') {
-                throw new Exception("Nama kategori harus diisi.");
-            }
-
-            $stmt = $pdo->prepare("
-                INSERT INTO tbl_kategori
-                (nama_kategori, deskripsi)
-                VALUES (?, ?)
-            ");
-
-            $stmt->execute([$nama, $deskripsi]);
-
-            $_SESSION['message'] = "Kategori berhasil ditambahkan.";
-            redirect('kategori');
-        }
-
-        /* EDIT KATEGORI */
-        if ($action === 'edit_kategori') {
-
-            $stmt = $pdo->prepare("
-                UPDATE tbl_kategori
-                SET nama_kategori = ?, deskripsi = ?
-                WHERE id_kategori = ?
-            ");
-
-            $stmt->execute([
-                trim($_POST['nama_kategori']),
-                trim($_POST['deskripsi']),
-                (int)$_POST['id_kategori']
-            ]);
-
-            $_SESSION['message'] = "Kategori berhasil diperbarui.";
-            redirect('kategori');
-        }
-
-        /* HAPUS KATEGORI */
-        if ($action === 'hapus_kategori') {
-
-            $id = (int)$_POST['id_kategori'];
-
-            $cek = $pdo->prepare("
-                SELECT COUNT(*)
+                SELECT stok
                 FROM tbl_produk
-                WHERE id_kategori = ?
-            ");
-
-            $cek->execute([$id]);
-
-            if ($cek->fetchColumn() > 0) {
-                throw new Exception(
-                    "Kategori masih digunakan oleh produk."
-                );
-            }
-
-            $stmt = $pdo->prepare("
-                DELETE FROM tbl_kategori
-                WHERE id_kategori = ?
-            ");
-
-            $stmt->execute([$id]);
-
-            $_SESSION['message'] = "Kategori berhasil dihapus.";
-            redirect('kategori');
-        }
-
-        /* TAMBAH PRODUK */
-        if ($action === 'tambah_produk') {
-
-            $nama = trim($_POST['nama_produk']);
-            $kategoriID = (int)$_POST['id_kategori'];
-            $harga = (float)$_POST['harga'];
-            $stok = (int)$_POST['stok'];
-
-            if ($nama === '' || $harga < 0 || $stok < 0) {
-                throw new Exception("Data produk tidak valid.");
-            }
-
-            $stmt = $pdo->prepare("
-                INSERT INTO tbl_produk
-                (nama_produk, id_kategori, harga, stok)
-                VALUES (?, ?, ?, ?)
-            ");
-
-            $stmt->execute([
-                $nama,
-                $kategoriID,
-                $harga,
-                $stok
-            ]);
-
-            $_SESSION['message'] = "Produk berhasil ditambahkan.";
-            redirect('produk');
-        }
-
-        /* EDIT PRODUK */
-        if ($action === 'edit_produk') {
-
-            $stmt = $pdo->prepare("
-                UPDATE tbl_produk
-                SET nama_produk = ?,
-                    id_kategori = ?,
-                    harga = ?,
-                    stok = ?
-                WHERE id_produk = ?
-            ");
-
-            $stmt->execute([
-                trim($_POST['nama_produk']),
-                (int)$_POST['id_kategori'],
-                (float)$_POST['harga'],
-                (int)$_POST['stok'],
-                (int)$_POST['id_produk']
-            ]);
-
-            $_SESSION['message'] = "Produk berhasil diperbarui.";
-            redirect('produk');
-        }
-
-        /* HAPUS PRODUK */
-        if ($action === 'hapus_produk') {
-
-            $id = (int)$_POST['id_produk'];
-
-            $stmt = $pdo->prepare("
-                DELETE FROM tbl_produk
                 WHERE id_produk = ?
             ");
 
             $stmt->execute([$id]);
+            $produkCek = $stmt->fetch();
 
-            $_SESSION['message'] = "Produk berhasil dihapus.";
-            redirect('produk');
+            if ($produkCek) {
+                $_SESSION['keranjang_pelanggan'][$id] =
+                    min($jumlah, (int)$produkCek['stok']);
+            } else {
+                unset($_SESSION['keranjang_pelanggan'][$id]);
+            }
         }
 
-        /* TAMBAH TRANSAKSI */
-        if ($action === 'tambah_transaksi') {
+        flash('Keranjang berhasil diperbarui.');
+        redirectHalaman('keranjang');
+    }
 
-            $idPelanggan = (int)$_POST['id_pelanggan'];
-            $idProduk = (int)$_POST['id_produk'];
-            $jumlah = (int)$_POST['jumlah'];
+    /* HAPUS ITEM KERANJANG */
 
-            if ($jumlah < 1) {
-                throw new Exception("Jumlah produk minimal 1.");
-            }
+    if ($aksi === 'hapus_keranjang') {
+
+        $idProduk = (int)($_POST['id_produk'] ?? 0);
+
+        unset($_SESSION['keranjang_pelanggan'][$idProduk]);
+
+        flash('Produk dihapus dari keranjang.');
+        redirectHalaman('keranjang');
+    }
+
+    /* KOSONGKAN KERANJANG */
+
+    if ($aksi === 'kosongkan_keranjang') {
+
+        $_SESSION['keranjang_pelanggan'] = [];
+
+        flash('Keranjang berhasil dikosongkan.');
+        redirectHalaman('keranjang');
+    }
+
+    /* =================================================
+       CHECKOUT
+    ================================================= */
+
+    if ($aksi === 'checkout') {
+
+        $keranjang = $_SESSION['keranjang_pelanggan'];
+
+        if (empty($keranjang)) {
+            flash('Keranjang belanja masih kosong.', 'error');
+            redirectHalaman('keranjang');
+        }
+
+        $metode = $_POST['metode_pembayaran'] ?? '';
+        $metodeValid = [
+            'Tunai',
+            'Transfer Bank',
+            'E-Wallet',
+            'QRIS'
+        ];
+
+        if (!in_array($metode, $metodeValid, true)) {
+            flash('Metode pembayaran tidak valid.', 'error');
+            redirectHalaman('checkout');
+        }
+
+        $uangDiterima = (float)($_POST['uang_diterima'] ?? 0);
+
+        try {
 
             $pdo->beginTransaction();
 
-            $stmt = $pdo->prepare("
-                SELECT nama_produk, harga, stok
-                FROM tbl_produk
-                WHERE id_produk = ?
-                FOR UPDATE
-            ");
+            $detailBelanja = [];
+            $totalBelanja = 0;
 
-            $stmt->execute([$idProduk]);
-            $dataProduk = $stmt->fetch();
+            /* CEK STOK DAN KUNCI BARIS PRODUK */
 
-            if (!$dataProduk) {
-                throw new Exception("Produk tidak ditemukan.");
+            foreach ($keranjang as $idProduk => $jumlah) {
+
+                $idProduk = (int)$idProduk;
+                $jumlah = (int)$jumlah;
+
+                if ($jumlah <= 0) {
+                    throw new Exception('Jumlah produk tidak valid.');
+                }
+
+                $stmt = $pdo->prepare("
+                    SELECT
+                        id_produk,
+                        nama_produk,
+                        harga,
+                        stok
+                    FROM tbl_produk
+                    WHERE id_produk = ?
+                    FOR UPDATE
+                ");
+
+                $stmt->execute([$idProduk]);
+                $produkCek = $stmt->fetch();
+
+                if (!$produkCek) {
+                    throw new Exception('Ada produk yang sudah tidak tersedia.');
+                }
+
+                if ((int)$produkCek['stok'] < $jumlah) {
+                    throw new Exception(
+                        'Stok ' . $produkCek['nama_produk'] .
+                        ' tidak mencukupi. Stok tersedia: ' .
+                        $produkCek['stok']
+                    );
+                }
+
+                $subtotal = (float)$produkCek['harga'] * $jumlah;
+
+                $totalBelanja += $subtotal;
+
+                $detailBelanja[] = [
+                    'id_produk' => $idProduk,
+                    'nama_produk' => $produkCek['nama_produk'],
+                    'jumlah' => $jumlah,
+                    'harga' => $produkCek['harga'],
+                    'subtotal' => $subtotal
+                ];
             }
 
-            if ($dataProduk['stok'] < $jumlah) {
-                throw new Exception("Stok produk tidak mencukupi.");
+            /* VALIDASI PEMBAYARAN */
+
+            if ($metode === 'Tunai') {
+
+                if ($uangDiterima < $totalBelanja) {
+                    throw new Exception('Uang yang dibayarkan belum mencukupi.');
+                }
+
+                $kembalian = $uangDiterima - $totalBelanja;
+
+            } else {
+
+                /*
+                 * Untuk metode non-tunai, nominal transaksi
+                 * dicatat sebesar total belanja.
+                 * Pembayaran gateway belum terintegrasi.
+                 */
+
+                $uangDiterima = $totalBelanja;
+                $kembalian = 0;
             }
 
-            $cekPelanggan = $pdo->prepare("
-                SELECT COUNT(*)
-                FROM tbl_pelanggan
-                WHERE id_pelanggan = ?
-            ");
+            /* INSERT TRANSAKSI */
 
-            $cekPelanggan->execute([$idPelanggan]);
+            $kolomInsert = [
+                'tanggal',
+                'id_pelanggan',
+                'total_belanja'
+            ];
 
-            if (!$cekPelanggan->fetchColumn()) {
-                throw new Exception("Pelanggan tidak ditemukan.");
-            }
-
-            $total = $dataProduk['harga'] * $jumlah;
-
-            $stmt = $pdo->prepare("
-                INSERT INTO tbl_transaksi
-                (tanggal, id_pelanggan, total_belanja)
-                VALUES (CURDATE(), ?, ?)
-            ");
-
-            $stmt->execute([
+            $nilaiInsert = [
+                date('Y-m-d'),
                 $idPelanggan,
-                $total
-            ]);
+                $totalBelanja
+            ];
 
-            $idTransaksi = $pdo->lastInsertId();
+            if (isset($kolomTransaksi['metode_pembayaran'])) {
+                $kolomInsert[] = 'metode_pembayaran';
+                $nilaiInsert[] = $metode;
+            }
 
-            $stmt = $pdo->prepare("
+            if (isset($kolomTransaksi['uang_diterima'])) {
+                $kolomInsert[] = 'uang_diterima';
+                $nilaiInsert[] = $uangDiterima;
+            }
+
+            if (isset($kolomTransaksi['kembalian'])) {
+                $kolomInsert[] = 'kembalian';
+                $nilaiInsert[] = $kembalian;
+            }
+
+            $namaKolom = implode(', ', $kolomInsert);
+            $tandaTanya = implode(', ', array_fill(0, count($nilaiInsert), '?'));
+
+            $sqlInsert = "
+                INSERT INTO tbl_transaksi
+                ($namaKolom)
+                VALUES ($tandaTanya)
+            ";
+
+            $stmt = $pdo->prepare($sqlInsert);
+            $stmt->execute($nilaiInsert);
+
+            $idTransaksi = (int)$pdo->lastInsertId();
+
+            /* INSERT DETAIL TRANSAKSI DAN KURANGI STOK */
+
+            $stmtDetail = $pdo->prepare("
                 INSERT INTO tbl_detail_transaksi
-                (id_transaksi, nama_produk, jumlah, harga)
-                VALUES (?, ?, ?, ?)
+                (
+                    id_transaksi,
+                    id_produk,
+                    nama_produk,
+                    jumlah,
+                    harga
+                )
+                VALUES (?, ?, ?, ?, ?)
             ");
 
-            $stmt->execute([
-                $idTransaksi,
-                $dataProduk['nama_produk'],
-                $jumlah,
-                $dataProduk['harga']
-            ]);
-
-            $stmt = $pdo->prepare("
+            $stmtStok = $pdo->prepare("
                 UPDATE tbl_produk
                 SET stok = stok - ?
                 WHERE id_produk = ?
+                  AND stok >= ?
             ");
 
-            $stmt->execute([$jumlah, $idProduk]);
+            foreach ($detailBelanja as $detail) {
 
-            activity(
-                $pdo,
-                $idTransaksi,
-                "Transaksi berhasil dibuat."
-            );
+                $stmtDetail->execute([
+                    $idTransaksi,
+                    $detail['id_produk'],
+                    $detail['nama_produk'],
+                    $detail['jumlah'],
+                    $detail['harga']
+                ]);
+
+                $stmtStok->execute([
+                    $detail['jumlah'],
+                    $detail['id_produk'],
+                    $detail['jumlah']
+                ]);
+
+                if ($stmtStok->rowCount() !== 1) {
+                    throw new Exception('Gagal memperbarui stok produk.');
+                }
+            }
 
             $pdo->commit();
 
-            $_SESSION['message'] = "Transaksi berhasil disimpan.";
-            redirect('transaksi');
+            $_SESSION['keranjang_pelanggan'] = [];
+
+            flash('Pembelian berhasil dicatat. Terima kasih sudah berbelanja!');
+
+            header(
+                'Location: index.php?halaman=struk&id=' .
+                $idTransaksi
+            );
+            exit;
+
+        } catch (Throwable $e) {
+
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            flash($e->getMessage(), 'error');
+            redirectHalaman('checkout');
         }
-
-    } catch (Exception $e) {
-
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-
-        $_SESSION['message'] = $e->getMessage();
-        redirect($page);
     }
 }
 
-/* =========================================
-   6. PESAN NOTIFIKASI
-========================================= */
+/* =====================================================
+   8. HALAMAN AKTIF
+===================================================== */
 
-if (isset($_SESSION['message'])) {
-    $message = $_SESSION['message'];
-    unset($_SESSION['message']);
+$halaman = $_GET['halaman'] ?? 'dashboard';
+
+$halamanValid = [
+    'dashboard',
+    'produk',
+    'keranjang',
+    'checkout',
+    'riwayat',
+    'profil',
+    'struk'
+];
+
+if (!in_array($halaman, $halamanValid, true)) {
+    $halaman = 'dashboard';
 }
 
-/* =========================================
-   7. MENGAMBIL DATA DATABASE
-========================================= */
+$pesanFlash = getFlash();
 
-$totalPenjualan = $pdo->query("
-    SELECT COALESCE(SUM(total_belanja), 0)
+/* =====================================================
+   9. STATISTIK
+===================================================== */
+
+$stmt = $pdo->prepare("
+    SELECT
+        COUNT(*) AS total_transaksi,
+        COALESCE(SUM(total_belanja), 0) AS total_belanja
     FROM tbl_transaksi
-")->fetchColumn();
+    WHERE id_pelanggan = ?
+");
 
-$totalTransaksi = $pdo->query("
-    SELECT COUNT(*) FROM tbl_transaksi
-")->fetchColumn();
+$stmt->execute([$idPelanggan]);
+$statistik = $stmt->fetch();
 
-$totalProduk = $pdo->query("
-    SELECT COUNT(*) FROM tbl_produk
-")->fetchColumn();
+$totalTransaksi = (int)$statistik['total_transaksi'];
+$totalBelanja = (float)$statistik['total_belanja'];
 
-$totalPelanggan = $pdo->query("
-    SELECT COUNT(*) FROM tbl_pelanggan
-")->fetchColumn();
+/* =====================================================
+   10. RIWAYAT TRANSAKSI
+===================================================== */
 
-$totalKategori = $pdo->query("
-    SELECT COUNT(*) FROM tbl_kategori
-")->fetchColumn();
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM tbl_transaksi
+    WHERE id_pelanggan = ?
+    ORDER BY tanggal DESC, id_transaksi DESC
+");
 
-$rataTransaksi = $totalTransaksi
-    ? $totalPenjualan / $totalTransaksi
-    : 0;
+$stmt->execute([$idPelanggan]);
+$transaksi = $stmt->fetchAll();
 
-$pelanggan = $pdo->query("
-    SELECT * FROM tbl_pelanggan
-    ORDER BY id_pelanggan DESC
-")->fetchAll();
+/* =====================================================
+   11. DATA PRODUK
+===================================================== */
 
-$kategori = $pdo->query("
-    SELECT * FROM tbl_kategori
-    ORDER BY id_kategori DESC
-")->fetchAll();
-
-$produk = $pdo->query("
-    SELECT p.*, k.nama_kategori
+$stmt = $pdo->query("
+    SELECT
+        p.*,
+        k.nama_kategori
     FROM tbl_produk p
     LEFT JOIN tbl_kategori k
         ON p.id_kategori = k.id_kategori
     ORDER BY p.id_produk DESC
-")->fetchAll();
+");
 
-$transaksi = $pdo->query("
-    SELECT t.*, p.nama_pelanggan
-    FROM tbl_transaksi t
-    LEFT JOIN tbl_pelanggan p
-        ON t.id_pelanggan = p.id_pelanggan
-    ORDER BY t.id_transaksi DESC
-")->fetchAll();
+$produk = $stmt->fetchAll();
 
-/* DATA AKTIVITAS BESERTA INFORMASI TRANSAKSI */
+/* =====================================================
+   12. DATA KERANJANG
+===================================================== */
 
-$aktivitas = [];
+$keranjang = [];
+$totalKeranjang = 0;
+$totalItem = 0;
 
-try {
-    $aktivitas = $pdo->query("
+foreach ($_SESSION['keranjang_pelanggan'] as $id => $jumlah) {
+
+    $stmt = $pdo->prepare("
         SELECT
-            l.id_transaksi,
-            l.aktivitas,
-            l.waktu,
-            t.tanggal,
-            t.total_belanja,
-            p.nama_pelanggan
-        FROM log_transaksi l
-        LEFT JOIN tbl_transaksi t
-            ON l.id_transaksi = t.id_transaksi
-        LEFT JOIN tbl_pelanggan p
-            ON t.id_pelanggan = p.id_pelanggan
-        ORDER BY l.waktu DESC
-    ")->fetchAll();
+            p.*,
+            k.nama_kategori
+        FROM tbl_produk p
+        LEFT JOIN tbl_kategori k
+            ON p.id_kategori = k.id_kategori
+        WHERE p.id_produk = ?
+    ");
 
-} catch (PDOException $e) {
-    $aktivitas = [];
+    $stmt->execute([(int)$id]);
+    $item = $stmt->fetch();
+
+    if (!$item) {
+        unset($_SESSION['keranjang_pelanggan'][$id]);
+        continue;
+    }
+
+    $item['jumlah_beli'] = (int)$jumlah;
+    $item['subtotal'] = (float)$item['harga'] * (int)$jumlah;
+
+    $keranjang[] = $item;
+    $totalKeranjang += $item['subtotal'];
+    $totalItem += (int)$jumlah;
 }
 
-/* DATA GRAFIK */
+/* =====================================================
+   13. DETAIL STRUK
+===================================================== */
 
-$chartData = $pdo->query("
-    SELECT MONTH(tanggal) AS bulan,
-           SUM(total_belanja) AS total
-    FROM tbl_transaksi
-    GROUP BY MONTH(tanggal)
-")->fetchAll();
+$dataStruk = null;
+$detailStruk = [];
 
-$monthly = array_fill(0, 12, 0);
+if ($halaman === 'struk') {
 
-foreach ($chartData as $item) {
-    $monthly[(int)$item['bulan'] - 1] = (float)$item['total'];
+    $idStruk = (int)($_GET['id'] ?? 0);
+
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM tbl_transaksi
+        WHERE id_transaksi = ?
+          AND id_pelanggan = ?
+        LIMIT 1
+    ");
+
+    $stmt->execute([$idStruk, $idPelanggan]);
+    $dataStruk = $stmt->fetch();
+
+    if ($dataStruk) {
+
+        $stmt = $pdo->prepare("
+            SELECT *
+            FROM tbl_detail_transaksi
+            WHERE id_transaksi = ?
+        ");
+
+        $stmt->execute([$idStruk]);
+        $detailStruk = $stmt->fetchAll();
+
+    } else {
+
+        flash('Transaksi tidak ditemukan.', 'error');
+        redirectHalaman('riwayat');
+    }
+}
+
+/* =====================================================
+   14. HELPER MENU
+===================================================== */
+
+function menuAktif($nama, $halaman)
+{
+    return $nama === $halaman ? 'active' : '';
 }
 
 ?>
@@ -780,1452 +626,1816 @@ foreach ($chartData as $item) {
 <!DOCTYPE html>
 <html lang="id">
 <head>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Dashboard | StoreFlow</title>
+<title>TamtoyMart | Customer Portal</title>
 
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <style>
+
+:root {
+    --primary: #3978d7;
+    --primary-dark: #2861ba;
+    --blue-light: #eaf2ff;
+    --background: #f5f8fd;
+    --white: #fff;
+    --text: #24334b;
+    --muted: #8794a9;
+    --border: #e8edf5;
+    --green: #19a879;
+    --red: #dc626d;
+    --shadow: 0 5px 20px rgba(40,76,130,.06);
+}
+
 * {
+    margin: 0;
+    padding: 0;
     box-sizing: border-box;
 }
 
 body {
-    margin: 0;
-    background: #f5f8fc;
-    font-family: Inter, Arial, sans-serif;
-    color: #26364b;
-    font-size: 15px;
+    font-family: Inter, sans-serif;
+    background: var(--background);
+    color: var(--text);
 }
+
+.layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* SIDEBAR */
 
 .sidebar {
     width: 245px;
-    background: #172b4d;
-    color: white;
+    background: white;
+    border-right: 1px solid var(--border);
+    padding: 28px 18px;
     position: fixed;
     inset: 0 auto 0 0;
-    padding: 25px 16px;
     z-index: 10;
+    display: flex;
+    flex-direction: column;
 }
 
 .brand {
-    font-size: 22px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 10px;
+    margin-bottom: 38px;
+}
+
+.brand-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    background: var(--primary);
+    color: white;
+    display: grid;
+    place-items: center;
+    font-size: 21px;
     font-weight: 800;
-    padding: 10px;
-    margin-bottom: 35px;
+}
+
+.brand h2 {
+    font-size: 18px;
+    font-weight: 800;
 }
 
 .brand span {
-    color: #83b6ff;
+    font-size: 11px;
+    color: var(--muted);
 }
 
 .menu-label {
-    color: #8fa3bf;
-    font-size: 11px;
-    margin: 20px 12px 12px;
-    letter-spacing: 1px;
-}
-
-.nav-link {
-    display: block;
-    color: #c2cee0;
-    text-decoration: none;
-    padding: 13px;
-    border-radius: 8px;
-    font-size: 14px;
-    margin-bottom: 5px;
-}
-
-.nav-link:hover,
-.nav-link.active {
-    background: #29466f;
-    color: white;
-}
-
-.main {
-    margin-left: 245px;
-}
-
-.topbar {
-    min-height: 75px;
-    background: white;
-    border-bottom: 1px solid #e8edf4;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 15px 30px;
-    gap: 15px;
-}
-
-.topbar h3 {
-    margin: 0 0 5px;
-    font-size: 19px;
-}
-
-.topbar p {
-    margin: 0;
-    font-size: 13px;
-    color: #8794a7;
-}
-
-.content {
-    padding: 25px 30px;
-}
-
-.welcome {
-    background: linear-gradient(110deg,#2e67b7,#4c8fe6);
-    color: white;
-    border-radius: 13px;
-    padding: 25px;
-    margin-bottom: 18px;
-}
-
-.welcome h2 {
-    margin: 0 0 8px;
-    font-size: 25px;
-}
-
-.welcome p {
-    font-size: 14px;
-    margin: 0;
-}
-
-.stats {
-    display: grid;
-    grid-template-columns: repeat(4,1fr);
-    gap: 14px;
-    margin-bottom: 15px;
-}
-
-.card,
-.panel {
-    background: white;
-    border: 1px solid #e8edf4;
-    border-radius: 12px;
-    padding: 18px;
-    box-shadow: 0 8px 28px #1b375a0a;
-}
-
-.card small {
-    color: #8794a7;
-    font-size: 13px;
-}
-
-.card h2 {
-    font-size: 22px;
-    margin: 12px 0 5px;
-}
-
-.card p {
-    color: #9aa6b5;
-    font-size: 12px;
-    margin: 0;
-}
-
-.grid {
-    display: grid;
-    grid-template-columns: 1.5fr 1fr;
-    gap: 15px;
-    margin-bottom: 15px;
-}
-
-.panel {
-    margin-bottom: 15px;
-    scroll-margin-top: 20px;
-}
-
-.panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-}
-
-.panel-header h3 {
-    font-size: 18px;
-    margin: 0 0 5px;
-}
-
-.panel-header p {
-    font-size: 13px;
-    color: #8794a7;
-    margin: 0;
-}
-
-.btn {
-    display: inline-block;
-    border: 0;
-    border-radius: 7px;
-    padding: 10px 13px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: none;
-}
-
-.primary {
-    background: #3978d5;
-    color: white;
-}
-
-.light {
-    background: #edf4ff;
-    color: #3978d5;
-}
-
-.danger {
-    background: #fff0f0;
-    color: #d34b4b;
-}
-
-input,
-select {
-    padding: 11px;
-    border: 1px solid #e8edf4;
-    border-radius: 7px;
-    font-size: 14px;
-    width: 100%;
-    background: white;
-}
-
-label {
-    display: block;
-    font-size: 13px;
-    color: #65758b;
-    margin-bottom: 6px;
-    font-weight: 600;
-}
-
-.form-group {
+    font-size: 10px;
+    color: #a0aabd;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    padding: 0 12px;
     margin-bottom: 12px;
 }
 
-.form-grid {
+.menu {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.menu a {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 14px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: #77849a;
+    font-size: 13px;
+    font-weight: 600;
+    transition: .2s;
+}
+
+.menu a:hover,
+.menu a.active {
+    background: var(--blue-light);
+    color: var(--primary);
+}
+
+.menu-icon {
+    width: 20px;
+    text-align: center;
+    font-size: 17px;
+}
+
+.cart-count {
+    margin-left: auto;
+    background: var(--primary);
+    color: white;
+    font-size: 10px;
+    border-radius: 20px;
+    padding: 3px 7px;
+}
+
+.sidebar-bottom {
+    margin-top: auto;
+    padding-top: 20px;
+}
+
+.sidebar-bottom a {
+    display: block;
+    padding: 12px;
+    text-decoration: none;
+    color: var(--red);
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 10px;
+    background: #fff1f2;
+}
+
+/* MAIN */
+
+.main {
+    margin-left: 245px;
+    width: calc(100% - 245px);
+    padding: 30px 35px;
+}
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 28px;
+}
+
+.topbar h1 {
+    font-size: 23px;
+    font-weight: 800;
+}
+
+.topbar p {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    background: white;
+    padding: 9px 15px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+.avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    place-items: center;
+    color: var(--primary);
+    background: var(--blue-light);
+    font-weight: 800;
+}
+
+.user-info strong {
+    font-size: 12px;
+}
+
+.user-info small {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 3px;
+}
+
+/* WELCOME */
+
+.welcome {
+    background: linear-gradient(120deg, #3978d7, #679be8);
+    color: white;
+    border-radius: 17px;
+    padding: 28px 30px;
+    margin-bottom: 23px;
+    position: relative;
+    overflow: hidden;
+}
+
+.welcome small {
+    font-size: 11px;
+    opacity: .85;
+}
+
+.welcome h2 {
+    font-size: 23px;
+    margin: 10px 0;
+}
+
+.welcome p {
+    font-size: 12px;
+    opacity: .9;
+}
+
+/* CARD */
+
+.content-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 24px;
+    margin-bottom: 22px;
+}
+
+.section-heading {
+    margin-bottom: 20px;
+}
+
+.section-heading h2 {
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.section-heading p {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+}
+
+/* STATISTIK */
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    padding: 21px;
+    box-shadow: var(--shadow);
+}
+
+.stat-title {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.stat-card h2 {
+    font-size: 23px;
+    margin-top: 13px;
+}
+
+.stat-card small {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+/* TABEL */
+
+.table-wrapper {
+    overflow-x: auto;
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 650px;
-}
-
-.table-wrap {
-    overflow-x: auto;
+    min-width: 620px;
 }
 
 th {
     text-align: left;
-    color: #8794a7;
-    font-size: 12px;
-    padding: 13px 9px;
-    border-bottom: 1px solid #e8edf4;
+    padding: 14px 13px;
+    background: #f7f9fd;
+    color: #8290a5;
+    font-size: 10px;
+    text-transform: uppercase;
 }
 
 td {
-    font-size: 13px;
-    padding: 14px 9px;
-    border-bottom: 1px solid #f0f2f6;
+    padding: 15px 13px;
+    border-bottom: 1px solid #edf0f5;
+    font-size: 12px;
+    color: #59677d;
 }
 
-.status {
-    background: #e7f7ef;
-    color: #26945c;
-    border-radius: 20px;
-    padding: 5px 9px;
-    font-size: 12px;
+.transaction-id {
+    color: var(--primary);
+    font-weight: 700;
 }
+
+.payment {
+    display: inline-block;
+    padding: 6px 10px;
+    background: var(--blue-light);
+    color: var(--primary);
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+/* PRODUK */
+
+.search {
+    width: 100%;
+    max-width: 350px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    outline: none;
+    font-family: inherit;
+    font-size: 12px;
+    margin-bottom: 20px;
+}
+
+.search:focus,
+.input:focus,
+select:focus {
+    border-color: var(--primary);
+}
+
+.product-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    gap: 18px;
+}
+
+.product-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    overflow: hidden;
+    transition: .2s;
+}
+
+.product-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow);
+}
+
+.product-image {
+    height: 165px;
+    background: #edf3fc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a2b7;
+    font-size: 11px;
+    overflow: hidden;
+}
+
+.product-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.product-info {
+    padding: 16px;
+}
+
+.category {
+    display: inline-block;
+    padding: 5px 9px;
+    background: var(--blue-light);
+    color: var(--primary);
+    border-radius: 20px;
+    font-size: 10px;
+}
+
+.product-info h3 {
+    font-size: 13px;
+    margin: 12px 0 8px;
+}
+
+.product-price {
+    color: var(--primary);
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.product-stock {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 9px;
+}
+
+.stock-habis {
+    color: var(--red);
+}
+
+.btn {
+    display: inline-block;
+    border: none;
+    cursor: pointer;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: .2s;
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-dark);
+}
+
+.btn-light {
+    background: var(--blue-light);
+    color: var(--primary);
+}
+
+.btn-danger {
+    background: #fff0f1;
+    color: var(--red);
+}
+
+.btn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.add-form {
+    margin-top: 14px;
+    display: flex;
+    gap: 8px;
+}
+
+.add-form input {
+    width: 58px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    text-align: center;
+}
+
+/* FORM */
+
+.input-group {
+    margin-bottom: 17px;
+}
+
+.input-group label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.input,
+select {
+    width: 100%;
+    padding: 12px 13px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    outline: none;
+    font-family: inherit;
+    font-size: 12px;
+    background: white;
+}
+
+.checkout-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 20px;
+}
+
+.summary-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    margin-bottom: 13px;
+    color: #65738a;
+}
+
+.summary-total {
+    border-top: 1px solid var(--border);
+    padding-top: 15px;
+    margin-top: 15px;
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--primary);
+}
+
+/* PROFIL */
+
+.profile {
+    display: flex;
+    align-items: center;
+    gap: 17px;
+}
+
+.profile-avatar {
+    width: 65px;
+    height: 65px;
+    border-radius: 17px;
+    background: var(--blue-light);
+    color: var(--primary);
+    display: grid;
+    place-items: center;
+    font-size: 25px;
+    font-weight: 800;
+}
+
+.profile h3 {
+    font-size: 15px;
+    margin-bottom: 6px;
+}
+
+.profile p {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.9;
+}
+
+.account-badge {
+    display: inline-block;
+    margin-top: 7px;
+    background: #e9f9f2;
+    color: #13865f;
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+/* PESAN */
 
 .alert {
-    background: #e7f7ef;
-    color: #247b50;
-    padding: 13px 15px;
-    border-radius: 8px;
-    margin-bottom: 15px;
-    font-size: 14px;
+    padding: 14px 17px;
+    border-radius: 10px;
+    font-size: 12px;
+    margin-bottom: 20px;
+}
+
+.alert.success {
+    background: #e9f9f2;
+    color: #13865f;
 }
 
 .alert.error {
-    background: #fff0f0;
-    color: #b63838;
+    background: #fff0f1;
+    color: #c34c5b;
+}
+
+.empty {
+    text-align: center;
+    padding: 40px 15px;
+    color: var(--muted);
+}
+
+.empty h3 {
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 7px;
+}
+
+.empty p {
+    font-size: 11px;
+}
+
+/* STRUK */
+
+.receipt {
+    max-width: 650px;
+    margin: auto;
+}
+
+.receipt-header {
+    text-align: center;
+    border-bottom: 1px dashed #dce4ef;
+    padding-bottom: 20px;
+    margin-bottom: 20px;
+}
+
+.receipt-header h2 {
+    color: var(--primary);
+    margin-bottom: 7px;
+}
+
+.receipt-info {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.receipt-total {
+    border-top: 1px dashed #dce4ef;
+    padding-top: 15px;
+    margin-top: 15px;
 }
 
 .footer {
-    color: #9aa6b5;
-    font-size: 12px;
-    padding: 15px 0;
+    text-align: center;
+    color: #a0aabd;
+    font-size: 10px;
+    padding: 10px;
 }
 
-@media(max-width:1000px) {
-    .stats {
-        grid-template-columns: repeat(2,1fr);
+/* RESPONSIVE */
+
+@media(max-width: 1050px) {
+    .product-grid {
+        grid-template-columns: repeat(2, minmax(0,1fr));
     }
 }
 
-@media(max-width:750px) {
+@media(max-width: 900px) {
     .sidebar {
-        position: static;
-        width: 100%;
-        padding: 12px;
+        width: 75px;
+        padding: 22px 10px;
     }
 
     .brand {
-        margin: 0;
+        justify-content: center;
+        padding: 0;
     }
 
-    .menu-label {
+    .brand-text,
+    .menu-label,
+    .menu-text {
         display: none;
     }
 
-    .sidebar nav {
-        display: flex;
-        flex-wrap: wrap;
+    .menu a {
+        justify-content: center;
+        padding: 14px 8px;
     }
 
-    .nav-link {
-        padding: 9px;
-        margin: 2px;
-        font-size: 12px;
+    .cart-count {
+        position: absolute;
+        margin-left: 22px;
+        margin-top: -22px;
     }
 
     .main {
-        margin-left: 0;
+        margin-left: 75px;
+        width: calc(100% - 75px);
+        padding: 25px 20px;
+    }
+}
+
+@media(max-width: 650px) {
+    .main {
+        padding: 20px 13px;
     }
 
     .topbar {
-        padding: 15px;
+        align-items: flex-start;
     }
 
-    .content {
-        padding: 15px;
+    .topbar h1 {
+        font-size: 19px;
     }
 
-    .grid {
-        grid-template-columns: 1fr;
+    .user-info {
+        padding: 7px;
+    }
+
+    .user-info div:last-child {
+        display: none;
+    }
+
+    .welcome {
+        padding: 23px 20px;
+    }
+
+    .welcome h2 {
+        font-size: 19px;
     }
 
     .stats {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
+        gap: 12px;
     }
-}
 
-@media(max-width:480px) {
-    .form-grid {
+    .content-card {
+        padding: 17px;
+    }
+
+    .product-grid {
         grid-template-columns: 1fr;
     }
 
-    .stats {
+    .checkout-grid {
         grid-template-columns: 1fr;
     }
+
+    .profile {
+        align-items: flex-start;
+    }
 }
+
+@media print {
+    body {
+        background: white;
+    }
+
+    .sidebar,
+    .topbar,
+    .no-print,
+    .footer {
+        display: none !important;
+    }
+
+    .main {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+    }
+
+    .content-card {
+        border: none;
+        box-shadow: none;
+    }
+}
+
 </style>
 </head>
 
 <body>
 
+<div class="layout">
+
+<!-- SIDEBAR -->
+
 <aside class="sidebar">
 
-    <div class="brand">Store<span>Flow</span></div>
+    <div class="brand">
+        <div class="brand-icon">T</div>
+        <div class="brand-text">
+            <h2>TamtoyMart</h2>
+            <span>Customer Portal</span>
+        </div>
+    </div>
 
-    <div class="menu-label">MENU UTAMA</div>
+    <div class="menu-label">MENU PELANGGAN</div>
 
-    <nav>
-        <a href="index.php?page=dashboard"
-           class="nav-link <?= $page === 'dashboard' ? 'active' : '' ?>">
-           ▦ Dashboard
+    <nav class="menu">
+
+        <a href="index.php?halaman=dashboard"
+           class="<?= menuAktif('dashboard', $halaman) ?>">
+            <span class="menu-icon">⌂</span>
+            <span class="menu-text">Dashboard</span>
         </a>
 
-        <a href="index.php?page=produk"
-           class="nav-link <?= $page === 'produk' ? 'active' : '' ?>">
-           ▣ Produk
+        <a href="index.php?halaman=produk"
+           class="<?= menuAktif('produk', $halaman) ?>">
+            <span class="menu-icon">▦</span>
+            <span class="menu-text">Produk</span>
         </a>
 
-        <a href="index.php?page=kategori"
-           class="nav-link <?= $page === 'kategori' ? 'active' : '' ?>">
-           ▤ Kategori
+        <a href="index.php?halaman=keranjang"
+           class="<?= menuAktif('keranjang', $halaman) ?>">
+            <span class="menu-icon">🛒</span>
+            <span class="menu-text">Keranjang</span>
+
+            <?php if ($totalItem > 0): ?>
+                <span class="cart-count"><?= $totalItem ?></span>
+            <?php endif; ?>
         </a>
 
-        <a href="index.php?page=pelanggan"
-           class="nav-link <?= $page === 'pelanggan' ? 'active' : '' ?>">
-           ♙ Pelanggan
+        <a href="index.php?halaman=riwayat"
+           class="<?= menuAktif('riwayat', $halaman) ?>">
+            <span class="menu-icon">▤</span>
+            <span class="menu-text">Riwayat Transaksi</span>
         </a>
 
-        <a href="index.php?page=transaksi"
-           class="nav-link <?= $page === 'transaksi' ? 'active' : '' ?>">
-           ▧ Transaksi
+        <a href="index.php?halaman=profil"
+           class="<?= menuAktif('profil', $halaman) ?>">
+            <span class="menu-icon">♙</span>
+            <span class="menu-text">Profil Saya</span>
         </a>
 
-        <a href="index.php?page=laporan"
-           class="nav-link <?= $page === 'laporan' ? 'active' : '' ?>">
-           ▥ Laporan Penjualan
-        </a>
-
-        <a href="index.php?page=stok"
-           class="nav-link <?= $page === 'stok' ? 'active' : '' ?>">
-           ◷ Stok Produk
-        </a>
-
-        <a href="index.php?page=aktivitas"
-           class="nav-link <?= $page === 'aktivitas' ? 'active' : '' ?>">
-           ◉ Aktivitas
-        </a>
     </nav>
 
+    <div class="sidebar-bottom">
+        <a href="../logout.php">↪ Keluar</a>
+    </div>
+
 </aside>
+
+<!-- MAIN -->
 
 <main class="main">
 
 <header class="topbar">
 
     <div>
-        <h3>Dashboard</h3>
-        <p>Ringkasan aktivitas toko</p>
+        <h1>
+            <?php
+            $judul = [
+                'dashboard' => 'Dashboard Pelanggan',
+                'produk' => 'Katalog Produk',
+                'keranjang' => 'Keranjang Belanja',
+                'checkout' => 'Checkout',
+                'riwayat' => 'Riwayat Transaksi',
+                'profil' => 'Profil Saya',
+                'struk' => 'Struk Pembelian'
+            ];
+
+            echo e($judul[$halaman]);
+            ?>
+        </h1>
+
+        <p>Selamat datang di halaman pelanggan TamtoyMart.</p>
     </div>
 
-    <div style="display:flex;align-items:center;gap:15px;flex-wrap:wrap">
-        <small>
-            <?= date('d F Y') ?> |
-            <?= e($_SESSION['nama'] ?? 'Admin') ?>
-        </small>
-
-        <a href="logout.php"
-           class="btn danger"
-           onclick="return confirm('Yakin ingin logout?')">
-            Logout
-        </a>
+    <div class="user-info">
+        <div class="avatar"><?= e($inisial) ?></div>
+        <div>
+            <strong><?= e($namaPelanggan) ?></strong>
+            <small>Pelanggan</small>
+        </div>
     </div>
 
 </header>
 
-<section class="content">
+<?php if ($pesanFlash): ?>
 
-<?php if ($message): ?>
-    <div class="alert <?= strpos($message, 'gagal') !== false || strpos($message, 'tidak') !== false || strpos($message, 'belum') !== false ? 'error' : '' ?>">
-        <?= e($message) ?>
+    <div class="alert <?= e($pesanFlash['jenis']) ?>">
+        <?= e($pesanFlash['pesan']) ?>
     </div>
+
 <?php endif; ?>
 
 
-<!-- =====================================
+<!-- =========================================
      DASHBOARD
-===================================== -->
+========================================= -->
 
-<?php if ($page === 'dashboard'): ?>
+<?php if ($halaman === 'dashboard'): ?>
 
-    <div class="welcome">
-        <h2>Selamat datang, Admin!</h2>
-        <p>Berikut adalah ringkasan informasi penjualan tokomu.</p>
-    </div>
+    <section class="welcome">
+        <small>SELAMAT DATANG DI TAMTOYMART</small>
 
-    <div class="stats">
+        <h2>Halo, <?= e($namaPelanggan) ?>!</h2>
 
-        <div class="card">
-            <small>Total Penjualan</small>
-            <h2><?= rupiah($totalPenjualan) ?></h2>
-            <p>Akumulasi seluruh transaksi</p>
+        <p>
+            Temukan produk favoritmu dan nikmati pengalaman
+            berbelanja yang mudah di TamtoyMart.
+        </p>
+
+        <br>
+
+        <a href="index.php?halaman=produk"
+           class="btn btn-light">
+            Mulai Belanja
+        </a>
+    </section>
+
+    <section class="stats">
+
+        <div class="stat-card">
+            <span class="stat-title">Total Transaksi</span>
+            <h2><?= number_format($totalTransaksi) ?></h2>
+            <small>Seluruh pembelianmu</small>
         </div>
 
-        <div class="card">
-            <small>Total Transaksi</small>
-            <h2><?= $totalTransaksi ?></h2>
-            <p>Transaksi tercatat</p>
+        <div class="stat-card">
+            <span class="stat-title">Total Belanja</span>
+            <h2><?= rupiah($totalBelanja) ?></h2>
+            <small>Akumulasi pembelian</small>
         </div>
 
-        <div class="card">
-            <small>Total Produk</small>
-            <h2><?= $totalProduk ?></h2>
-            <p>Produk tersedia</p>
+        <div class="stat-card">
+            <span class="stat-title">Jumlah Produk</span>
+            <h2><?= count($produk) ?></h2>
+            <small>Produk terdaftar</small>
         </div>
 
-        <div class="card">
-            <small>Total Pelanggan</small>
-            <h2><?= $totalPelanggan ?></h2>
-            <p>Pelanggan terdaftar</p>
+    </section>
+
+    <section class="content-card">
+
+        <div class="section-heading">
+            <h2>Transaksi Terbaru</h2>
+            <p>Aktivitas pembelian terakhir.</p>
         </div>
 
-    </div>
+        <div class="table-wrapper">
 
-    <div class="stats">
-
-        <div class="card">
-            <small>Total Kategori</small>
-            <h2><?= $totalKategori ?></h2>
-        </div>
-
-        <div class="card">
-            <small>Rata-rata Transaksi</small>
-            <h2><?= rupiah($rataTransaksi) ?></h2>
-        </div>
-
-    </div>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Grafik Penjualan</h3>
-                <p>Statistik penjualan per bulan</p>
-            </div>
-        </div>
-
-        <div style="height:260px">
-            <canvas id="salesChart"></canvas>
-        </div>
-
-    </div>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Transaksi Terbaru</h3>
-                <p>Daftar transaksi penjualan toko</p>
-            </div>
-
-            <a href="index.php?page=transaksi" class="btn primary">
-                Lihat Transaksi
-            </a>
-        </div>
-
-        <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
-                        <th>ID TRANSAKSI</th>
-                        <th>TANGGAL</th>
-                        <th>PELANGGAN</th>
-                        <th>TOTAL BELANJA</th>
+                        <th>ID Transaksi</th>
+                        <th>Tanggal</th>
+                        <th>Total Belanja</th>
+                        <th>Pembayaran</th>
                     </tr>
                 </thead>
 
                 <tbody>
-                <?php foreach (array_slice($transaksi, 0, 5) as $t): ?>
+
+                <?php if ($transaksi): ?>
+
+                    <?php foreach (array_slice($transaksi, 0, 5) as $row): ?>
+
+                        <tr>
+                            <td class="transaction-id">
+                                #<?= e($row['id_transaksi']) ?>
+                            </td>
+
+                            <td>
+                                <?= date('d-m-Y', strtotime($row['tanggal'])) ?>
+                            </td>
+
+                            <td>
+                                <strong><?= rupiah($row['total_belanja']) ?></strong>
+                            </td>
+
+                            <td>
+                                <span class="payment">
+                                    <?= e($row['metode_pembayaran'] ?? 'Belum diisi') ?>
+                                </span>
+                            </td>
+                        </tr>
+
+                    <?php endforeach; ?>
+
+                <?php else: ?>
+
                     <tr>
-                        <td>#TRX-<?= e($t['id_transaksi']) ?></td>
-                        <td><?= e($t['tanggal']) ?></td>
-                        <td><?= e($t['nama_pelanggan']) ?></td>
-                        <td><?= rupiah($t['total_belanja']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-
-                <?php if (!$transaksi): ?>
-                    <tr>
-                        <td colspan="4">Belum ada transaksi.</td>
-                    </tr>
-                <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-
-<!-- =====================================
-     PELANGGAN
-===================================== -->
-
-<?php elseif ($page === 'pelanggan'): ?>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Data Pelanggan</h3>
-                <p>Kelola data pelanggan toko</p>
-            </div>
-
-            <button class="btn primary"
-                onclick="showForm('formTambahPelanggan')">
-                + Tambah Pelanggan
-            </button>
-        </div>
-
-        <form id="formTambahPelanggan"
-              method="POST"
-              style="display:none"
-              class="panel">
-
-            <h3>Tambah Pelanggan</h3>
-
-            <input type="hidden" name="action" value="tambah_pelanggan">
-
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Nama Pelanggan</label>
-                    <input type="text" name="nama_pelanggan" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Kota</label>
-                    <input type="text" name="kota" required>
-                </div>
-            </div>
-
-            <button class="btn primary">Simpan</button>
-
-            <button type="button" class="btn light"
-                onclick="showForm('formTambahPelanggan')">
-                Batal
-            </button>
-        </form>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>NAMA PELANGGAN</th>
-                        <th>KOTA</th>
-                        <th>AKSI</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                <?php foreach ($pelanggan as $p): ?>
-                    <tr>
-                        <td><?= e($p['id_pelanggan']) ?></td>
-                        <td><?= e($p['nama_pelanggan']) ?></td>
-                        <td><?= e($p['kota']) ?></td>
-                        <td>
-
-                            <button class="btn light"
-                                onclick='editPelanggan(
-                                    <?= (int)$p['id_pelanggan'] ?>,
-                                    <?= json_encode($p['nama_pelanggan']) ?>,
-                                    <?= json_encode($p['kota']) ?>
-                                )'>
-                                Edit
-                            </button>
-
-                            <form method="POST" style="display:inline"
-                                onsubmit="return confirm('Hapus pelanggan ini?')">
-
-                                <input type="hidden" name="action" value="hapus_pelanggan">
-
-                                <input type="hidden"
-                                    name="id_pelanggan"
-                                    value="<?= e($p['id_pelanggan']) ?>">
-
-                                <button class="btn danger">Hapus</button>
-                            </form>
-
+                        <td colspan="4">
+                            <div class="empty">
+                                <h3>Belum Ada Transaksi</h3>
+                                <p>Mulai belanja untuk melihat riwayat pembelianmu.</p>
+                            </div>
                         </td>
                     </tr>
-                <?php endforeach; ?>
 
-                <?php if (!$pelanggan): ?>
-                    <tr>
-                        <td colspan="4">Belum ada pelanggan.</td>
-                    </tr>
                 <?php endif; ?>
+
                 </tbody>
             </table>
+
         </div>
 
-    </div>
-
-    <div class="panel" id="editPelanggan" style="display:none">
-
-        <h3>Edit Pelanggan</h3>
-
-        <form method="POST">
-
-            <input type="hidden" name="action" value="edit_pelanggan">
-            <input type="hidden" name="id_pelanggan" id="edit_id">
-
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Nama Pelanggan</label>
-                    <input type="text" name="nama_pelanggan" id="edit_nama" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Kota</label>
-                    <input type="text" name="kota" id="edit_kota" required>
-                </div>
-            </div>
-
-            <button class="btn primary">Simpan Perubahan</button>
-
-        </form>
-
-    </div>
+    </section>
 
 
-<!-- =====================================
-     KATEGORI
-===================================== -->
-
-<?php elseif ($page === 'kategori'): ?>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Data Kategori</h3>
-                <p>Kelola kategori produk</p>
-            </div>
-
-            <button class="btn primary"
-                onclick="showForm('formTambahKategori')">
-                + Tambah Kategori
-            </button>
-        </div>
-
-        <form id="formTambahKategori"
-              method="POST"
-              style="display:none"
-              class="panel">
-
-            <h3>Tambah Kategori</h3>
-
-            <input type="hidden" name="action" value="tambah_kategori">
-
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Nama Kategori</label>
-                    <input type="text" name="nama_kategori" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Deskripsi</label>
-                    <input type="text" name="deskripsi">
-                </div>
-            </div>
-
-            <button class="btn primary">Simpan</button>
-
-            <button type="button" class="btn light"
-                onclick="showForm('formTambahKategori')">
-                Batal
-            </button>
-
-        </form>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>NAMA KATEGORI</th>
-                        <th>DESKRIPSI</th>
-                        <th>AKSI</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                <?php foreach ($kategori as $k): ?>
-                    <tr>
-                        <td><?= e($k['id_kategori']) ?></td>
-                        <td><?= e($k['nama_kategori']) ?></td>
-                        <td><?= e($k['deskripsi']) ?></td>
-                        <td>
-
-                            <button class="btn light"
-                                onclick='editKategori(
-                                    <?= (int)$k['id_kategori'] ?>,
-                                    <?= json_encode($k['nama_kategori']) ?>,
-                                    <?= json_encode($k['deskripsi']) ?>
-                                )'>
-                                Edit
-                            </button>
-
-                            <form method="POST" style="display:inline"
-                                onsubmit="return confirm('Hapus kategori ini?')">
-
-                                <input type="hidden" name="action" value="hapus_kategori">
-
-                                <input type="hidden"
-                                    name="id_kategori"
-                                    value="<?= e($k['id_kategori']) ?>">
-
-                                <button class="btn danger">Hapus</button>
-                            </form>
-
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-
-                <?php if (!$kategori): ?>
-                    <tr>
-                        <td colspan="4">Belum ada kategori.</td>
-                    </tr>
-                <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-    <div class="panel" id="editKategori" style="display:none">
-
-        <h3>Edit Kategori</h3>
-
-        <form method="POST">
-
-            <input type="hidden" name="action" value="edit_kategori">
-            <input type="hidden" name="id_kategori" id="edit_kategori_id">
-
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Nama Kategori</label>
-                    <input type="text" name="nama_kategori"
-                        id="edit_kategori_nama" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Deskripsi</label>
-                    <input type="text" name="deskripsi"
-                        id="edit_kategori_deskripsi">
-                </div>
-            </div>
-
-            <button class="btn primary">Simpan Perubahan</button>
-
-        </form>
-
-    </div>
-
-
-<!-- =====================================
+<!-- =========================================
      PRODUK
-===================================== -->
+========================================= -->
 
-<?php elseif ($page === 'produk'): ?>
+<?php elseif ($halaman === 'produk'): ?>
 
-    <div class="panel">
+    <section class="welcome">
+        <small>KOLEKSI PRODUK</small>
+        <h2>Temukan Produk Favoritmu</h2>
+        <p>Pilih produk yang ingin kamu beli dan masukkan ke keranjang.</p>
+    </section>
 
-        <div class="panel-header">
-            <div>
-                <h3>Data Produk</h3>
-                <p>Kelola produk dan stok toko</p>
-            </div>
+    <section class="content-card">
 
-            <button class="btn primary"
-                onclick="showForm('formTambahProduk')">
-                + Tambah Produk
-            </button>
+        <div class="section-heading">
+            <h2>Semua Produk</h2>
+            <p><?= count($produk) ?> produk tersedia di TamtoyMart.</p>
         </div>
 
-        <form id="formTambahProduk"
-              method="POST"
-              style="display:none"
-              class="panel">
+        <input
+            type="search"
+            id="cariProduk"
+            class="search"
+            placeholder="Cari nama produk..."
+        >
 
-            <h3>Tambah Produk</h3>
+        <div class="product-grid" id="productGrid">
 
-            <input type="hidden" name="action" value="tambah_produk">
+            <?php if ($produk): ?>
 
-            <div class="form-grid">
-
-                <div class="form-group">
-                    <label>Nama Produk</label>
-                    <input type="text" name="nama_produk" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Kategori</label>
-                    <select name="id_kategori" required>
-                        <?php foreach ($kategori as $k): ?>
-                            <option value="<?= e($k['id_kategori']) ?>">
-                                <?= e($k['nama_kategori']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>Harga</label>
-                    <input type="number" name="harga" min="0" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Stok</label>
-                    <input type="number" name="stok" min="0" required>
-                </div>
-
-            </div>
-
-            <button class="btn primary">Simpan</button>
-
-            <button type="button" class="btn light"
-                onclick="showForm('formTambahProduk')">
-                Batal
-            </button>
-
-        </form>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>NAMA PRODUK</th>
-                        <th>KATEGORI</th>
-                        <th>HARGA</th>
-                        <th>STOK</th>
-                        <th>AKSI</th>
-                    </tr>
-                </thead>
-
-                <tbody>
                 <?php foreach ($produk as $p): ?>
-                    <tr>
-                        <td><?= e($p['id_produk']) ?></td>
-                        <td><?= e($p['nama_produk']) ?></td>
-                        <td><?= e($p['nama_kategori']) ?></td>
-                        <td><?= rupiah($p['harga']) ?></td>
-                        <td><?= e($p['stok']) ?></td>
-                        <td>
 
-                            <button class="btn light"
-                                onclick='editProduk(
-                                    <?= (int)$p['id_produk'] ?>,
-                                    <?= json_encode($p['nama_produk']) ?>,
-                                    <?= (int)$p['id_kategori'] ?>,
-                                    <?= (float)$p['harga'] ?>,
-                                    <?= (int)$p['stok'] ?>
-                                )'>
-                                Edit
-                            </button>
+                    <article class="product-card"
+                             data-nama="<?= e(strtolower($p['nama_produk'])) ?>">
 
-                            <form method="POST" style="display:inline"
-                                onsubmit="return confirm('Hapus produk ini?')">
+                        <div class="product-image">
 
-                                <input type="hidden" name="action" value="hapus_produk">
+                            <?php
+                            $fileGambar = $p['gambar'] ?? '';
+                            $pathGambar = __DIR__ . '/../assets/img/produk/' . $fileGambar;
+                            ?>
 
-                                <input type="hidden"
-                                    name="id_produk"
-                                    value="<?= e($p['id_produk']) ?>">
+                            <?php if ($fileGambar && is_file($pathGambar)): ?>
 
-                                <button class="btn danger">Hapus</button>
-                            </form>
-
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-
-                <?php if (!$produk): ?>
-                    <tr>
-                        <td colspan="6">Belum ada produk.</td>
-                    </tr>
-                <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-    <div class="panel" id="editProduk" style="display:none">
-
-        <h3>Edit Produk</h3>
-
-        <form method="POST">
-
-            <input type="hidden" name="action" value="edit_produk">
-            <input type="hidden" name="id_produk" id="edit_produk_id">
-
-            <div class="form-grid">
-
-                <div class="form-group">
-                    <label>Nama Produk</label>
-                    <input type="text" name="nama_produk"
-                        id="edit_produk_nama" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Kategori</label>
-                    <select name="id_kategori" id="edit_produk_kategori">
-                        <?php foreach ($kategori as $k): ?>
-                            <option value="<?= e($k['id_kategori']) ?>">
-                                <?= e($k['nama_kategori']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>Harga</label>
-                    <input type="number" name="harga"
-                        id="edit_produk_harga" min="0" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Stok</label>
-                    <input type="number" name="stok"
-                        id="edit_produk_stok" min="0" required>
-                </div>
-
-            </div>
-
-            <button class="btn primary">Simpan Perubahan</button>
-
-        </form>
-
-    </div>
-
-
-<!-- =====================================
-     TRANSAKSI
-===================================== -->
-
-<?php elseif ($page === 'transaksi'): ?>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Data Transaksi</h3>
-                <p>Kelola transaksi penjualan</p>
-            </div>
-
-            <button class="btn primary"
-                onclick="showForm('formTransaksi')">
-                + Buat Transaksi
-            </button>
-        </div>
-
-        <form id="formTransaksi"
-              method="POST"
-              style="display:none"
-              class="panel">
-
-            <h3>Transaksi Baru</h3>
-
-            <input type="hidden" name="action" value="tambah_transaksi">
-
-            <div class="form-grid">
-
-                <div class="form-group">
-                    <label>Pelanggan</label>
-                    <select name="id_pelanggan" required>
-                        <?php foreach ($pelanggan as $p): ?>
-                            <option value="<?= e($p['id_pelanggan']) ?>">
-                                <?= e($p['nama_pelanggan']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>Produk</label>
-                    <select name="id_produk" required>
-                        <?php foreach ($produk as $p): ?>
-                            <?php if ($p['stok'] > 0): ?>
-                                <option value="<?= e($p['id_produk']) ?>">
-                                    <?= e($p['nama_produk']) ?>
-                                    - <?= rupiah($p['harga']) ?>
-                                    (Stok <?= e($p['stok']) ?>)
-                                </option>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>Jumlah</label>
-                    <input type="number" name="jumlah"
-                        min="1" value="1" required>
-                </div>
-
-            </div>
-
-            <button class="btn primary">Simpan Transaksi</button>
-
-            <button type="button" class="btn light"
-                onclick="showForm('formTransaksi')">
-                Batal
-            </button>
-
-        </form>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID TRANSAKSI</th>
-                        <th>TANGGAL</th>
-                        <th>PELANGGAN</th>
-                        <th>TOTAL BELANJA</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                <?php foreach ($transaksi as $t): ?>
-                    <tr>
-                        <td>#TRX-<?= e($t['id_transaksi']) ?></td>
-                        <td><?= e($t['tanggal']) ?></td>
-                        <td><?= e($t['nama_pelanggan']) ?></td>
-                        <td><?= rupiah($t['total_belanja']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-
-                <?php if (!$transaksi): ?>
-                    <tr>
-                        <td colspan="4">Belum ada transaksi.</td>
-                    </tr>
-                <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-
-<!-- =====================================
-     STOK PRODUK
-===================================== -->
-
-<?php elseif ($page === 'stok'): ?>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Stok Produk</h3>
-                <p>Informasi ketersediaan produk</p>
-            </div>
-        </div>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>PRODUK</th>
-                        <th>KATEGORI</th>
-                        <th>STOK</th>
-                        <th>STATUS</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                <?php foreach ($produk as $p): ?>
-                    <tr>
-                        <td><?= e($p['nama_produk']) ?></td>
-                        <td><?= e($p['nama_kategori']) ?></td>
-                        <td><?= e($p['stok']) ?></td>
-                        <td>
-                            <?php if ($p['stok'] <= 5): ?>
-                                <span style="color:#d34b4b">
-                                    Stok Rendah
-                                </span>
-                            <?php else: ?>
-                                <span style="color:#26945c">
-                                    Tersedia
-                                </span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-
-                <?php if (!$produk): ?>
-                    <tr>
-                        <td colspan="4">Belum ada produk.</td>
-                    </tr>
-                <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-
-<!-- =====================================
-     LAPORAN PENJUALAN
-===================================== -->
-
-<?php elseif ($page === 'laporan'): ?>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Laporan Penjualan</h3>
-                <p>Rekap seluruh transaksi penjualan</p>
-            </div>
-
-            <button class="btn primary" onclick="window.print()">
-                Cetak Laporan
-            </button>
-        </div>
-
-        <h2><?= rupiah($totalPenjualan) ?></h2>
-        <p>Total penjualan keseluruhan</p>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID TRANSAKSI</th>
-                        <th>TANGGAL</th>
-                        <th>PELANGGAN</th>
-                        <th>TOTAL</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                <?php foreach ($transaksi as $t): ?>
-                    <tr>
-                        <td><?= e($t['id_transaksi']) ?></td>
-                        <td><?= e($t['tanggal']) ?></td>
-                        <td><?= e($t['nama_pelanggan']) ?></td>
-                        <td><?= rupiah($t['total_belanja']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-
-                <?php if (!$transaksi): ?>
-                    <tr>
-                        <td colspan="4">Belum ada transaksi.</td>
-                    </tr>
-                <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-
-<!-- =====================================
-     AKTIVITAS + CETAK STRUK + PDF
-===================================== -->
-
-<?php elseif ($page === 'aktivitas'): ?>
-
-    <div class="panel">
-
-        <div class="panel-header">
-            <div>
-                <h3>Aktivitas Sistem</h3>
-                <p>Riwayat aktivitas transaksi dan bukti pembelian</p>
-            </div>
-        </div>
-
-        <div class="table-wrap">
-            <table>
-
-                <thead>
-                    <tr>
-                        <th>ID TRANSAKSI</th>
-                        <th>TANGGAL</th>
-                        <th>PELANGGAN</th>
-                        <th>AKTIVITAS</th>
-                        <th>TOTAL</th>
-                        <th>AKSI</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-
-                <?php foreach ($aktivitas as $a): ?>
-
-                    <tr>
-
-                        <td>
-                            #TRX-<?= e($a['id_transaksi']) ?>
-                        </td>
-
-                        <td>
-                            <?= e($a['tanggal'] ?? $a['waktu']) ?>
-                        </td>
-
-                        <td>
-                            <?= e($a['nama_pelanggan'] ?? '-') ?>
-                        </td>
-
-                        <td>
-                            <?= e($a['aktivitas']) ?>
-                        </td>
-
-                        <td>
-                            <?= rupiah($a['total_belanja'] ?? 0) ?>
-                        </td>
-
-                        <td>
-
-                            <?php if (!empty($a['id_transaksi']) && $a['total_belanja'] !== null): ?>
-
-                                <a
-                                    href="index.php?struk=<?= (int)$a['id_transaksi'] ?>"
-                                    target="_blank"
-                                    class="btn light"
-                                    style="margin-bottom:5px"
+                                <img
+                                    src="../assets/img/produk/<?= rawurlencode($fileGambar) ?>"
+                                    alt="<?= e($p['nama_produk']) ?>"
                                 >
-                                    Cetak Struk
-                                </a>
-
-                                <a
-                                    href="index.php?struk=<?= (int)$a['id_transaksi'] ?>&pdf=1"
-                                    target="_blank"
-                                    class="btn primary"
-                                >
-                                    Download PDF
-                                </a>
 
                             <?php else: ?>
 
-                                <span style="color:#9aa6b5">
-                                    Tidak tersedia
-                                </span>
+                                Tidak ada gambar produk
 
                             <?php endif; ?>
 
+                        </div>
+
+                        <div class="product-info">
+
+                            <span class="category">
+                                <?= e($p['nama_kategori'] ?? 'Tanpa kategori') ?>
+                            </span>
+
+                            <h3><?= e($p['nama_produk']) ?></h3>
+
+                            <div class="product-price">
+                                <?= rupiah($p['harga']) ?>
+                            </div>
+
+                            <div class="product-stock <?= (int)$p['stok'] < 1 ? 'stock-habis' : '' ?>">
+                                <?php if ((int)$p['stok'] > 0): ?>
+                                    Stok tersedia: <?= (int)$p['stok'] ?>
+                                <?php else: ?>
+                                    Stok habis
+                                <?php endif; ?>
+                            </div>
+
+                            <?php if ((int)$p['stok'] > 0): ?>
+
+                                <form method="POST"
+                                      action="index.php?halaman=produk"
+                                      class="add-form">
+
+                                    <input type="hidden" name="csrf"
+                                           value="<?= e($csrf) ?>">
+
+                                    <input type="hidden" name="aksi"
+                                           value="tambah_keranjang">
+
+                                    <input type="hidden" name="id_produk"
+                                           value="<?= (int)$p['id_produk'] ?>">
+
+                                    <input
+                                        type="number"
+                                        name="jumlah"
+                                        value="1"
+                                        min="1"
+                                        max="<?= (int)$p['stok'] ?>"
+                                        required
+                                    >
+
+                                    <button class="btn btn-primary" type="submit">
+                                        + Keranjang
+                                    </button>
+
+                                </form>
+
+                            <?php else: ?>
+
+                                <button class="btn btn-danger" disabled>
+                                    Stok Habis
+                                </button>
+
+                            <?php endif; ?>
+
+                        </div>
+
+                    </article>
+
+                <?php endforeach; ?>
+
+            <?php else: ?>
+
+                <div class="empty">
+                    <h3>Belum Ada Produk</h3>
+                    <p>Produk belum tersedia saat ini.</p>
+                </div>
+
+            <?php endif; ?>
+
+        </div>
+
+        <div class="empty" id="hasilKosong" style="display:none;">
+            <h3>Produk Tidak Ditemukan</h3>
+            <p>Coba gunakan kata pencarian lainnya.</p>
+        </div>
+
+    </section>
+
+
+<!-- =========================================
+     KERANJANG
+========================================= -->
+
+<?php elseif ($halaman === 'keranjang'): ?>
+
+    <section class="content-card">
+
+        <div class="section-heading">
+            <h2>Keranjang Belanja</h2>
+            <p>Periksa produk dan jumlah barang sebelum checkout.</p>
+        </div>
+
+        <?php if ($keranjang): ?>
+
+            <form method="POST" action="index.php?halaman=keranjang">
+
+                <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+                <input type="hidden" name="aksi" value="update_keranjang">
+
+                <div class="table-wrapper">
+
+                    <table>
+
+                        <thead>
+                            <tr>
+                                <th>Produk</th>
+                                <th>Harga</th>
+                                <th>Jumlah</th>
+                                <th>Subtotal</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+
+                        <?php foreach ($keranjang as $item): ?>
+
+                            <tr>
+
+                                <td>
+                                    <strong><?= e($item['nama_produk']) ?></strong>
+                                </td>
+
+                                <td><?= rupiah($item['harga']) ?></td>
+
+                                <td>
+                                    <input
+                                        type="number"
+                                        name="jumlah[<?= (int)$item['id_produk'] ?>]"
+                                        value="<?= (int)$item['jumlah_beli'] ?>"
+                                        min="0"
+                                        max="<?= (int)$item['stok'] ?>"
+                                        style="width:65px;padding:7px;border:1px solid #e8edf5;border-radius:7px;"
+                                    >
+                                </td>
+
+                                <td>
+                                    <strong><?= rupiah($item['subtotal']) ?></strong>
+                                </td>
+
+                                <td>
+                                    <form></form>
+                                    <button
+                                        type="button"
+                                        class="btn btn-danger"
+                                        onclick="hapusItem(<?= (int)$item['id_produk'] ?>)">
+                                        Hapus
+                                    </button>
+                                </td>
+
+                            </tr>
+
+                        <?php endforeach; ?>
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+                <br>
+
+                <button class="btn btn-light" type="submit">
+                    Perbarui Keranjang
+                </button>
+
+            </form>
+
+            <?php foreach ($keranjang as $item): ?>
+
+                <form method="POST"
+                      action="index.php?halaman=keranjang"
+                      id="hapus-<?= (int)$item['id_produk'] ?>"
+                      style="display:none;">
+
+                    <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+                    <input type="hidden" name="aksi" value="hapus_keranjang">
+                    <input type="hidden" name="id_produk"
+                           value="<?= (int)$item['id_produk'] ?>">
+
+                </form>
+
+            <?php endforeach; ?>
+
+            <div style="max-width:350px;margin:25px 0 0 auto;">
+
+                <div class="summary-line">
+                    <span>Total item</span>
+                    <strong><?= $totalItem ?> barang</strong>
+                </div>
+
+                <div class="summary-line summary-total">
+                    <span>Total Belanja</span>
+                    <strong><?= rupiah($totalKeranjang) ?></strong>
+                </div>
+
+                <a href="index.php?halaman=checkout"
+                   class="btn btn-primary"
+                   style="display:block;text-align:center;margin-top:15px;">
+                    Lanjutkan Checkout
+                </a>
+
+                <form method="POST" action="index.php?halaman=keranjang"
+                      style="margin-top:10px;">
+
+                    <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+                    <input type="hidden" name="aksi" value="kosongkan_keranjang">
+
+                    <button class="btn btn-danger" type="submit"
+                            style="width:100%;">
+                        Kosongkan Keranjang
+                    </button>
+
+                </form>
+
+            </div>
+
+        <?php else: ?>
+
+            <div class="empty">
+                <h3>Keranjang Masih Kosong</h3>
+                <p>Belum ada produk yang kamu pilih.</p>
+                <br>
+                <a href="index.php?halaman=produk" class="btn btn-primary">
+                    Mulai Belanja
+                </a>
+            </div>
+
+        <?php endif; ?>
+
+    </section>
+
+
+<!-- =========================================
+     CHECKOUT
+========================================= -->
+
+<?php elseif ($halaman === 'checkout'): ?>
+
+    <?php if (!$keranjang): ?>
+
+        <section class="content-card">
+            <div class="empty">
+                <h3>Keranjang Masih Kosong</h3>
+                <p>Tambahkan produk sebelum melanjutkan checkout.</p>
+                <br>
+                <a href="index.php?halaman=produk" class="btn btn-primary">
+                    Pilih Produk
+                </a>
+            </div>
+        </section>
+
+    <?php else: ?>
+
+        <div class="checkout-grid">
+
+            <section class="content-card">
+
+                <div class="section-heading">
+                    <h2>Konfirmasi Pesanan</h2>
+                    <p>Pastikan produk dan jumlah pesanan sudah benar.</p>
+                </div>
+
+                <?php foreach ($keranjang as $item): ?>
+
+                    <div class="summary-line">
+                        <span>
+                            <?= e($item['nama_produk']) ?>
+                            × <?= (int)$item['jumlah_beli'] ?>
+                        </span>
+
+                        <strong><?= rupiah($item['subtotal']) ?></strong>
+                    </div>
+
+                <?php endforeach; ?>
+
+                <div class="summary-line summary-total">
+                    <span>Total Pembayaran</span>
+                    <strong><?= rupiah($totalKeranjang) ?></strong>
+                </div>
+
+            </section>
+
+            <section class="content-card">
+
+                <div class="section-heading">
+                    <h2>Pembayaran</h2>
+                    <p>Isi informasi pembayaran pesananmu.</p>
+                </div>
+
+                <form method="POST" action="index.php?halaman=checkout"
+                      id="formCheckout">
+
+                    <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+                    <input type="hidden" name="aksi" value="checkout">
+
+                    <div class="input-group">
+                        <label>Nama Pelanggan</label>
+                        <input class="input"
+                               value="<?= e($namaPelanggan) ?>"
+                               readonly>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Metode Pembayaran</label>
+
+                        <select name="metode_pembayaran"
+                                id="metodePembayaran" required>
+
+                            <option value="">Pilih pembayaran</option>
+                            <option value="Tunai">Tunai</option>
+                            <option value="Transfer Bank">Transfer Bank</option>
+                            <option value="E-Wallet">E-Wallet</option>
+                            <option value="QRIS">QRIS</option>
+
+                        </select>
+                    </div>
+
+                    <div class="input-group" id="uangGroup" style="display:none;">
+
+                        <label>Uang Diterima</label>
+
+                        <input
+                            type="number"
+                            name="uang_diterima"
+                            id="uangDiterima"
+                            class="input"
+                            min="<?= (float)$totalKeranjang ?>"
+                            placeholder="Masukkan jumlah uang"
+                        >
+
+                        <small style="color:#8794a9;font-size:10px;display:block;margin-top:7px;">
+                            Minimal <?= rupiah($totalKeranjang) ?>
+                        </small>
+
+                    </div>
+
+                    <div class="summary-line summary-total">
+                        <span>Total</span>
+                        <strong><?= rupiah($totalKeranjang) ?></strong>
+                    </div>
+
+                    <button type="submit"
+                            class="btn btn-primary"
+                            style="width:100%;margin-top:15px;">
+
+                        Konfirmasi Pembelian
+
+                    </button>
+
+                    <a href="index.php?halaman=keranjang"
+                       class="btn btn-light"
+                       style="display:block;text-align:center;margin-top:10px;">
+
+                        Kembali ke Keranjang
+
+                    </a>
+
+                </form>
+
+            </section>
+
+        </div>
+
+    <?php endif; ?>
+
+
+<!-- =========================================
+     RIWAYAT
+========================================= -->
+
+<?php elseif ($halaman === 'riwayat'): ?>
+
+    <section class="content-card">
+
+        <div class="section-heading">
+            <h2>Riwayat Transaksi</h2>
+            <p>Semua pembelian yang tercatat pada akunmu.</p>
+        </div>
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>ID Transaksi</th>
+                        <th>Tanggal</th>
+                        <th>Total Belanja</th>
+                        <th>Metode Pembayaran</th>
+                        <th>Struk</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                <?php if ($transaksi): ?>
+
+                    <?php foreach ($transaksi as $row): ?>
+
+                        <tr>
+
+                            <td class="transaction-id">
+                                #<?= e($row['id_transaksi']) ?>
+                            </td>
+
+                            <td>
+                                <?= date('d-m-Y', strtotime($row['tanggal'])) ?>
+                            </td>
+
+                            <td>
+                                <strong><?= rupiah($row['total_belanja']) ?></strong>
+                            </td>
+
+                            <td>
+                                <span class="payment">
+                                    <?= e($row['metode_pembayaran'] ?? 'Belum diisi') ?>
+                                </span>
+                            </td>
+
+                            <td>
+                                <a class="btn btn-light"
+                                   href="index.php?halaman=struk&id=<?= (int)$row['id_transaksi'] ?>">
+                                    Lihat Struk
+                                </a>
+                            </td>
+
+                        </tr>
+
+                    <?php endforeach; ?>
+
+                <?php else: ?>
+
+                    <tr>
+                        <td colspan="5">
+                            <div class="empty">
+                                <h3>Belum Ada Transaksi</h3>
+                                <p>Riwayat pembelianmu akan muncul di sini.</p>
+                            </div>
+                        </td>
+                    </tr>
+
+                <?php endif; ?>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+<!-- =========================================
+     PROFIL
+========================================= -->
+
+<?php elseif ($halaman === 'profil'): ?>
+
+    <section class="content-card">
+
+        <div class="section-heading">
+            <h2>Informasi Profil</h2>
+            <p>Informasi akun pelanggan yang sedang login.</p>
+        </div>
+
+        <div class="profile">
+
+            <div class="profile-avatar">
+                <?= e($inisial) ?>
+            </div>
+
+            <div>
+
+                <h3><?= e($namaPelanggan) ?></h3>
+
+                <p>
+                    Username: <?= e($akun['username']) ?><br>
+                    Nama: <?= e($namaPelanggan) ?><br>
+                    Kota: <?= e($akun['kota'] ?: 'Belum diisi') ?><br>
+                    ID Pelanggan: #<?= e($idPelanggan) ?>
+                </p>
+
+                <span class="account-badge">
+                    Akun Pelanggan Aktif
+                </span>
+
+            </div>
+
+        </div>
+
+    </section>
+
+    <section class="content-card">
+
+        <div class="section-heading">
+            <h2>Ringkasan Akun</h2>
+            <p>Informasi aktivitas belanjamu.</p>
+        </div>
+
+        <div class="stats">
+
+            <div class="stat-card">
+                <span class="stat-title">Total Transaksi</span>
+                <h2><?= number_format($totalTransaksi) ?></h2>
+            </div>
+
+            <div class="stat-card">
+                <span class="stat-title">Total Belanja</span>
+                <h2><?= rupiah($totalBelanja) ?></h2>
+            </div>
+
+            <div class="stat-card">
+                <span class="stat-title">ID Pelanggan</span>
+                <h2>#<?= e($idPelanggan) ?></h2>
+            </div>
+
+        </div>
+
+    </section>
+
+
+<!-- =========================================
+     STRUK
+========================================= -->
+
+<?php elseif ($halaman === 'struk'): ?>
+
+    <section class="content-card receipt">
+
+        <div class="receipt-header">
+            <h2>TamtoyMart</h2>
+            <p style="font-size:12px;color:#8794a9;">
+                Bukti Pembelian Pelanggan
+            </p>
+        </div>
+
+        <div class="receipt-info">
+            <span>Nomor Transaksi</span>
+            <strong>#<?= e($dataStruk['id_transaksi']) ?></strong>
+        </div>
+
+        <div class="receipt-info">
+            <span>Tanggal</span>
+            <strong><?= date('d-m-Y', strtotime($dataStruk['tanggal'])) ?></strong>
+        </div>
+
+        <div class="receipt-info">
+            <span>Pelanggan</span>
+            <strong><?= e($namaPelanggan) ?></strong>
+        </div>
+
+        <div class="receipt-info">
+            <span>Metode Pembayaran</span>
+            <strong><?= e($dataStruk['metode_pembayaran'] ?? 'Belum diisi') ?></strong>
+        </div>
+
+        <br>
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Produk</th>
+                        <th>Harga</th>
+                        <th>Jumlah</th>
+                        <th>Subtotal</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                <?php foreach ($detailStruk as $detail): ?>
+
+                    <tr>
+
+                        <td><?= e($detail['nama_produk']) ?></td>
+
+                        <td><?= rupiah($detail['harga']) ?></td>
+
+                        <td><?= (int)$detail['jumlah'] ?></td>
+
+                        <td>
+                            <?= rupiah($detail['harga'] * $detail['jumlah']) ?>
                         </td>
 
                     </tr>
 
                 <?php endforeach; ?>
 
-                <?php if (!$aktivitas): ?>
-                    <tr>
-                        <td colspan="6" style="text-align:center">
-                            Belum ada aktivitas transaksi.
-                        </td>
-                    </tr>
-                <?php endif; ?>
-
                 </tbody>
 
             </table>
+
         </div>
 
-    </div>
+        <div class="receipt-total">
+
+            <div class="receipt-info">
+                <span>Total Belanja</span>
+                <strong><?= rupiah($dataStruk['total_belanja']) ?></strong>
+            </div>
+
+            <div class="receipt-info">
+                <span>Uang Diterima</span>
+                <strong><?= rupiah($dataStruk['uang_diterima'] ?? $dataStruk['total_belanja']) ?></strong>
+            </div>
+
+            <div class="receipt-info">
+                <span>Kembalian</span>
+                <strong><?= rupiah($dataStruk['kembalian'] ?? 0) ?></strong>
+            </div>
+
+        </div>
+
+        <div style="text-align:center;margin-top:25px;color:#8794a9;font-size:11px;">
+            Terima kasih telah berbelanja di TamtoyMart.
+        </div>
+
+        <div class="no-print" style="display:flex;gap:10px;margin-top:25px;">
+
+            <button onclick="window.print()"
+                    class="btn btn-primary"
+                    style="flex:1;">
+                Cetak Struk
+            </button>
+
+            <a href="index.php?halaman=riwayat"
+               class="btn btn-light"
+               style="flex:1;text-align:center;">
+                Kembali
+            </a>
+
+        </div>
+
+    </section>
 
 <?php endif; ?>
 
 
 <div class="footer">
-    © 2026 StoreFlow - Sistem Informasi Penjualan Toko
+    © <?= date('Y') ?> TamtoyMart Customer Portal
 </div>
 
-</section>
 </main>
-
-
-<!-- =====================================
-     JAVASCRIPT
-===================================== -->
+</div>
 
 <script>
 
-function showForm(id) {
+/* PENCARIAN PRODUK */
 
-    const element = document.getElementById(id);
+const cariProduk = document.getElementById('cariProduk');
 
-    if (element) {
-        element.style.display =
-            element.style.display === 'none' ? 'block' : 'none';
-    }
+if (cariProduk) {
 
-}
+    cariProduk.addEventListener('input', function() {
 
-function editPelanggan(id, nama, kota) {
+        const keyword = this.value.toLowerCase();
+        const cards = document.querySelectorAll('.product-card');
 
-    document.getElementById('edit_id').value = id;
-    document.getElementById('edit_nama').value = nama;
-    document.getElementById('edit_kota').value = kota;
+        let jumlahTampil = 0;
 
-    const form = document.getElementById('editPelanggan');
+        cards.forEach(card => {
 
-    form.style.display = 'block';
-    form.scrollIntoView({behavior:'smooth'});
+            const nama = card.dataset.nama || '';
+            const cocok = nama.includes(keyword);
 
-}
+            card.style.display = cocok ? '' : 'none';
 
-function editKategori(id, nama, deskripsi) {
-
-    document.getElementById('edit_kategori_id').value = id;
-    document.getElementById('edit_kategori_nama').value = nama;
-    document.getElementById('edit_kategori_deskripsi').value = deskripsi;
-
-    const form = document.getElementById('editKategori');
-
-    form.style.display = 'block';
-    form.scrollIntoView({behavior:'smooth'});
-
-}
-
-function editProduk(id, nama, kategori, harga, stok) {
-
-    document.getElementById('edit_produk_id').value = id;
-    document.getElementById('edit_produk_nama').value = nama;
-    document.getElementById('edit_produk_kategori').value = kategori;
-    document.getElementById('edit_produk_harga').value = harga;
-    document.getElementById('edit_produk_stok').value = stok;
-
-    const form = document.getElementById('editProduk');
-
-    form.style.display = 'block';
-    form.scrollIntoView({behavior:'smooth'});
-
-}
-
-
-/* GRAFIK DASHBOARD */
-
-<?php if ($page === 'dashboard'): ?>
-
-const chartData = <?= json_encode($monthly) ?>;
-
-new Chart(document.getElementById('salesChart'), {
-
-    type: 'line',
-
-    data: {
-
-        labels: [
-            'Jan','Feb','Mar','Apr','Mei','Jun',
-            'Jul','Agu','Sep','Okt','Nov','Des'
-        ],
-
-        datasets: [{
-
-            label: 'Penjualan',
-
-            data: chartData,
-
-            borderColor: '#3978d5',
-
-            backgroundColor: 'rgba(57,120,213,.12)',
-
-            fill: true,
-
-            tension: .35
-
-        }]
-
-    },
-
-    options: {
-
-        responsive: true,
-
-        maintainAspectRatio: false,
-
-        plugins: {
-            legend: {
-                display: false
+            if (cocok) {
+                jumlahTampil++;
             }
-        },
 
-        scales: {
-            y: {
-                beginAtZero: true
-            }
+        });
+
+        const kosong = document.getElementById('hasilKosong');
+
+        if (kosong) {
+            kosong.style.display = jumlahTampil === 0 ? 'block' : 'none';
+        }
+
+    });
+
+}
+
+/* HAPUS ITEM KERANJANG */
+
+function hapusItem(id) {
+
+    if (confirm('Hapus produk ini dari keranjang?')) {
+
+        const form = document.getElementById('hapus-' + id);
+
+        if (form) {
+            form.submit();
         }
 
     }
 
-});
+}
 
-<?php endif; ?>
+/* METODE PEMBAYARAN */
+
+const metode = document.getElementById('metodePembayaran');
+const uangGroup = document.getElementById('uangGroup');
+const uangInput = document.getElementById('uangDiterima');
+
+function aturPembayaran() {
+
+    if (!metode || !uangGroup || !uangInput) {
+        return;
+    }
+
+    if (metode.value === 'Tunai') {
+
+        uangGroup.style.display = 'block';
+        uangInput.required = true;
+
+    } else {
+
+        uangGroup.style.display = 'none';
+        uangInput.required = false;
+        uangInput.value = '';
+
+    }
+
+}
+
+if (metode) {
+    metode.addEventListener('change', aturPembayaran);
+}
+
+/* VALIDASI CHECKOUT */
+
+const formCheckout = document.getElementById('formCheckout');
+
+if (formCheckout) {
+
+    formCheckout.addEventListener('submit', function(event) {
+
+        if (!metode.value) {
+            event.preventDefault();
+            alert('Silakan pilih metode pembayaran.');
+            return;
+        }
+
+        if (metode.value === 'Tunai' && (!uangInput.value || Number(uangInput.value) < Number(uangInput.min))) {
+            event.preventDefault();
+            alert('Uang yang dibayarkan belum mencukupi.');
+            return;
+        }
+
+        if (!confirm('Apakah kamu yakin ingin menyelesaikan pembelian?')) {
+            event.preventDefault();
+        }
+
+    });
+
+}
 
 </script>
 

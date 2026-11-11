@@ -1,15 +1,14 @@
+
 <?php
 session_start();
 
-if (!empty($_SESSION['user_id'])) {
-    header("Location: index.php");
-    exit;
-}
+/*
+|--------------------------------------------------------------------------
+| KONEKSI DATABASE
+|--------------------------------------------------------------------------
+*/
 
-$error = "";
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
+try {
     $pdo = new PDO(
         "mysql:host=localhost;dbname=db_toko;charset=utf8mb4",
         "root",
@@ -19,46 +18,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+} catch (PDOException $e) {
+    die("Koneksi database gagal.");
+}
+
+/*
+|--------------------------------------------------------------------------
+| REDIRECT BERDASARKAN ROLE
+|--------------------------------------------------------------------------
+*/
+
+function redirectRole($role)
+{
+    switch ($role) {
+        case 'admin':
+            header("Location: index.php");
+            exit;
+
+        case 'kasir':
+            header("Location: kasir/index.php");
+            exit;
+
+        case 'pelanggan':
+            header("Location: pelanggan/index.php");
+            exit;
+
+        default:
+            session_unset();
+            session_destroy();
+            header("Location: login.php");
+            exit;
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| JIKA SUDAH LOGIN
+|--------------------------------------------------------------------------
+*/
+
+if (!empty($_SESSION['user_id'])) {
+    redirectRole($_SESSION['role'] ?? '');
+}
+
+$error = "";
+
+/*
+|--------------------------------------------------------------------------
+| PROSES LOGIN
+|--------------------------------------------------------------------------
+*/
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    $stmt = $pdo->prepare("
-        SELECT id, username, password, nama, role
-        FROM users
-        WHERE username = ?
-        LIMIT 1
-    ");
+    if ($username === '' || $password === '') {
 
-    $stmt->execute([$username]);
-    $user = $stmt->fetch();
+        $error = "Username dan password wajib diisi!";
 
-    if (
-        $user &&
-        password_verify($password, $user['password']) &&
-        $user['role'] === 'admin'
-    ) {
-        session_regenerate_id(true);
-
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['nama'] = $user['nama'];
-        $_SESSION['role'] = $user['role'];
-
-        header("Location: index.php");
-        exit;
     } else {
-        $error = "Username atau password salah!";
+
+        $stmt = $pdo->prepare("
+            SELECT id, username, password, nama, role
+            FROM users
+            WHERE username = ?
+            LIMIT 1
+        ");
+
+        $stmt->execute([$username]);
+        $user = $stmt->fetch();
+
+        if ($user && password_verify($password, $user['password'])) {
+
+            $role = strtolower(trim($user['role']));
+
+            if (in_array($role, ['admin', 'kasir', 'pelanggan'], true)) {
+
+                session_regenerate_id(true);
+
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['username'] = $user['username'];
+                $_SESSION['nama'] = $user['nama'];
+                $_SESSION['role'] = $role;
+
+                redirectRole($role);
+
+            } else {
+
+                $error = "Role akun tidak ditemukan!";
+
+            }
+
+        } else {
+
+            $error = "Username atau password salah!";
+
+        }
     }
 }
 ?>
+
 
 <!DOCTYPE html>
 <html lang="id">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login | StoreFlow</title>
+<title>Login | TamtoyMart</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
@@ -189,7 +257,7 @@ button:hover {
     <h2>Selamat Datang!</h2>
 
     <p class="description">
-        Silakan login untuk mengakses dashboard StoreFlow.
+        Silakan login untuk mengakses dashboard TamtoyMart.
     </p>
 
     <?php if ($error): ?>
@@ -227,7 +295,7 @@ button:hover {
     </form>
 
     <div class="footer">
-        © 2026 StoreFlow. All rights reserved.
+        © 2026 TamtoyMart. All rights reserved.
     </div>
 
 </div>
