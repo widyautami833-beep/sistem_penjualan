@@ -1,11 +1,13 @@
-# StoreFlow – Sistem Manajemen Toko
+# TamtoyMart – Sistem Manajemen Toko
 
-StoreFlow adalah aplikasi berbasis web untuk membantu mengelola aktivitas toko, mulai dari pengelolaan produk, kategori, pelanggan, transaksi, stok barang, hingga laporan dan riwayat aktivitas.
+TamtoyMart adalah aplikasi berbasis web untuk membantu mengelola aktivitas toko, mulai dari pengelolaan produk, kategori, pelanggan, transaksi, stok barang, hingga laporan dan riwayat aktivitas.
+
+Aplikasi ini dikembangkan menggunakan PHP Native dan MySQL dengan menerapkan konsep CRUD, relasi database, PDO, serta pengelolaan transaksi database.
 
 ## Fitur Utama
 
-- **Dashboard** – Menampilkan ringkasan data toko.
-- **Data Produk** – Mengelola informasi produk, harga, dan stok.
+- **Dashboard** – Menampilkan ringkasan data dan informasi toko.
+- **Data Produk** – Mengelola informasi produk, harga, kategori, dan stok.
 - **Data Kategori** – Mengelola kategori produk.
 - **Data Pelanggan** – Mengelola informasi pelanggan.
 - **Transaksi** – Mencatat transaksi penjualan.
@@ -14,18 +16,62 @@ StoreFlow adalah aplikasi berbasis web untuk membantu mengelola aktivitas toko, 
 - **Riwayat Aktivitas** – Mencatat aktivitas transaksi.
 - **Cetak Struk** – Mencetak bukti transaksi.
 - **Simpan PDF** – Menyimpan struk transaksi sebagai PDF melalui fitur cetak browser.
+- **Autentikasi** – Mengelola proses login dan logout.
+- **Manajemen Hak Akses** – Membatasi akses berdasarkan role pengguna.
+
+## Role dan Hak Akses Pengguna
+
+TamtoyMart memiliki tiga jenis role pengguna dengan hak akses yang berbeda.
+
+### 1. Admin
+
+Admin merupakan pengguna yang memiliki hak akses penuh untuk mengelola sistem toko.
+
+Hak akses:
+- Melihat dashboard admin.
+- Mengelola data produk.
+- Mengelola data kategori.
+- Mengelola data pelanggan.
+- Mengelola data transaksi.
+- Mengelola stok produk.
+- Melihat laporan penjualan.
+- Melihat riwayat aktivitas.
+- Mengelola akun pengguna sesuai fitur yang tersedia.
+
+### 2. Kasir
+
+Kasir merupakan pengguna yang bertugas melayani transaksi penjualan.
+
+Hak akses:
+- Mengakses dashboard kasir.
+- Melihat informasi produk.
+- Melakukan transaksi penjualan.
+- Memproses pembayaran.
+- Melihat rincian transaksi.
+- Mencetak struk transaksi.
+- Menyimpan struk dalam format PDF.
+
+### 3. Pelanggan
+
+Pelanggan merupakan pengguna yang dapat mengakses fitur yang disediakan untuk pelanggan.
+
+Hak akses:
+- Login ke akun pelanggan.
+- Melihat informasi akun.
+- Mengakses data pelanggan.
+- Menggunakan fitur yang tersedia sesuai hak akses pelanggan.
 
 ## Teknologi yang Digunakan
 
 - PHP Native
-- MySQL
+- MySQL / MariaDB
 - PDO
 - HTML
 - CSS
 - JavaScript
-- Bootstrap (jika digunakan pada project)
+- Bootstrap (jika digunakan)
 
-## Persyaratan
+## Persyaratan Sistem
 
 Pastikan perangkat sudah memiliki:
 
@@ -34,71 +80,118 @@ Pastikan perangkat sudah memiliki:
 - MySQL atau MariaDB
 - Browser
 - Visual Studio Code (opsional)
+- Git (opsional)
 
 ## Cara Instalasi
 
-1. Clone repository ini:
+### 1. Clone Repository
 
-   ```bash
-   git clone https://github.com/USERNAME/storeflow.git
-   ```
+```bash
+git clone https://github.com/USERNAME/sistem-penjualan.git
+```
 
-2. Pindahkan folder project ke:
+### 2. Pindahkan Folder Project
 
-   ```text
-   C:\xampp\htdocs\
-   ```
+Pindahkan folder project ke:
 
-3. Jalankan Apache dan MySQL melalui XAMPP Control Panel.
+```text
+C:\xampp\htdocs\
+```
 
-4. Buka phpMyAdmin:
+### 3. Jalankan XAMPP
 
-   ```text
-   http://localhost/phpmyadmin
-   ```
+Aktifkan Apache dan MySQL melalui XAMPP Control Panel.
 
-5. Buat database dengan nama:
+### 4. Buat Database
 
-   ```text
-   db_toko
-   ```
+Buka phpMyAdmin:
 
-6. Import file database SQL yang tersedia di repository.
+```text
+http://localhost/phpmyadmin
+```
 
-7. Sesuaikan konfigurasi koneksi database pada file `index.php`:
+Buat database dengan nama:
 
-   ```php
-   $host = "localhost";
-   $dbname = "db_toko";
-   $username = "root";
-   $password = "";
-   ```
+```text
+db_toko
+```
 
-8. Jalankan aplikasi melalui browser:
+### 5. Import Database
 
-   ```text
-   http://localhost/storeflow
-   ```
+1. Pilih database `db_toko`.
+2. Klik menu Import.
+3. Pilih file database SQL.
+4. Klik Import dan tunggu hingga proses selesai.
+
+### 6. Konfigurasi Database
+
+Sesuaikan konfigurasi koneksi database pada file PHP:
+
+```php
+$host = "localhost";
+$dbname = "db_toko";
+$username = "root";
+$password = "";
+```
+
+### 7. Jalankan Aplikasi
+
+Buka browser dan akses:
+
+```text
+http://localhost/sistem-penjualan
+```
 
 ## Struktur Project
 
 ```text
-storeflow/
+sistem-penjualan/
 │
+├── assets/
+│   └── img/
+│       └── produk/
+│           ├── aqua-600ml.jpg
+│           ├── aqua.jpg
+│           ├── baterai-abc.jpg
+│           ├── beras.jpg
+│           ├── buku-sidu.jpg
+│           ├── chitato.jpg
+│           ├── fanta.jpg
+│           ├── goodday.jpg
+│           ├── indomie-goreng.jpg
+│           ├── iphone.jpg
+│           ├── le-minerale.jpg
+│           ├── lifebuoy.jpg
+│           ├── mie-sedaap.jpg
+│           ├── oreo.jpg
+│           ├── sari-roti.jpg
+│           ├── silverqueen.jpg
+│           ├── sunlight.jpg
+│           ├── teh-pucuk.jpg
+│           └── ultra-milk.jpg
+│
+├── kasir/
+│   └── index.php
+│
+├── pelanggan/
+│   ├── data.php
+│   └── index.php
+│
+├── auth.php
+├── buat_admin.php
+├── buat_kasir.php
 ├── index.php
 ├── login.php
 ├── logout.php
-├── auth.php
-├── README.md
-└── database/
-    └── db_toko.sql
+├── reset_password.php
+├── script.js
+├── style.css
+└── README.md
 ```
-
-*Struktur dapat disesuaikan dengan file yang tersedia di repository.*
 
 ## Database
 
-Database yang digunakan bernama `db_toko`, dengan tabel utama seperti:
+Database yang digunakan bernama `db_toko`, dengan tabel utama:
 
 - `tbl_produk`
 - `tbl_kategori`
@@ -109,16 +202,36 @@ Database yang digunakan bernama `db_toko`, dengan tabel utama seperti:
 - `log_hapus_pelanggan`
 - `tbl_cabang`
 
+## Keamanan Aplikasi
+
+- Menggunakan PDO Prepared Statements untuk membantu mencegah SQL Injection.
+- Menggunakan session untuk autentikasi pengguna.
+- Menerapkan pembatasan hak akses berdasarkan role.
+- Menggunakan password hashing.
+- Melakukan validasi input sebelum data diproses.
+- Menggunakan transaksi database untuk menjaga konsistensi data penjualan.
+
 ## Tujuan Pembuatan
 
-Project ini dibuat sebagai sarana pembelajaran pengembangan aplikasi web menggunakan PHP dan MySQL, khususnya dalam penerapan CRUD, relasi tabel, transaksi database, serta pengelolaan data toko.
+TamtoyMart dibuat sebagai sarana pembelajaran pengembangan aplikasi web menggunakan PHP dan MySQL, khususnya dalam penerapan:
+
+1. Create, Read, Update, Delete (CRUD).
+2. Relasi antar tabel database.
+3. Pemrograman PHP Native.
+4. Koneksi database menggunakan PDO.
+5. Autentikasi dan manajemen session.
+6. Pengelolaan hak akses pengguna.
+7. Transaksi database.
+8. Pengelolaan stok produk.
+9. Pembuatan laporan dan pencatatan aktivitas.
+10. Pengembangan antarmuka aplikasi web.
 
 ## Pengembang
 
-**StoreFlow – Sistem Manajemen Toko**
+**TamtoyMart – Sistem Manajemen Toko**
 
 Dikembangkan sebagai project pembelajaran Rekayasa Perangkat Lunak (RPL).
 
 ---
 
-© 2026 StoreFlow. All Rights Reserved.
+© 2026 TamtoyMart. All Rights Reserved.
