@@ -8,7 +8,7 @@ wajibRole('admin');
 ========================================= */
 
 $host = 'localhost';
-$dbname = 'db_toko';
+$dbname = 'db_toko_pulih';
 $username = 'root';
 $password = '';
 

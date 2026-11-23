@@ -10,7 +10,7 @@ session_start();
 
 try {
     $pdo = new PDO(
-        "mysql:host=localhost;dbname=db_toko;charset=utf8mb4",
+        "mysql:host=localhost;dbname=db_toko_pulih;charset=utf8mb4",
         "root",
         "",
         [

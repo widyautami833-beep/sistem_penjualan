@@ -1,53 +1,21 @@
 
 <?php
-$host = "localhost";
-$dbname = "db_toko";
-$usernameDB = "root";
-$passwordDB = "";
+$pdo = new PDO(
+    "mysql:host=localhost;dbname=db_toko_pulih;charset=utf8mb4",
+    "root",
+    ""
+);
 
-try {
-    $pdo = new PDO(
-        "mysql:host=$host;dbname=$dbname;charset=utf8mb4",
-        $usernameDB,
-        $passwordDB,
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-        ]
-    );
+$username = "admin";
+$password = password_hash("admin123", PASSWORD_DEFAULT);
+$nama = "Administrator";
+$role = "admin";
 
-    // Periksa apakah akun Admin sudah tersedia
-    $stmt = $pdo->prepare("
-        SELECT id FROM users
-        WHERE username = ?
-        LIMIT 1
-    ");
+$stmt = $pdo->prepare("
+    INSERT INTO users (username, password, nama, role)
+    VALUES (?, ?, ?, ?)
+");
 
-    $stmt->execute(["admin"]);
-    $admin = $stmt->fetch();
+$stmt->execute([$username, $password, $nama, $role]);
 
-    if ($admin) {
-        echo "Akun Admin sudah tersedia. Tidak ada perubahan password.";
-    } else {
-        $password = password_hash("admin123", PASSWORD_DEFAULT);
-
-        $stmt = $pdo->prepare("
-            INSERT INTO users (username, password, nama, role)
-            VALUES (?, ?, ?, ?)
-        ");
-
-        $stmt->execute([
-            "admin",
-            $password,
-            "Administrator",
-            "admin"
-        ]);
-
-        echo "Akun Admin berhasil dibuat!";
-        echo "<br>Username: admin";
-        echo "<br>Password: admin123";
-    }
-
-} catch (PDOException $e) {
-    die("Database error: " . htmlspecialchars($e->getMessage()));
-}
+echo "Akun admin berhasil dibuat!";

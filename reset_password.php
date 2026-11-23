@@ -1,30 +1,31 @@
 
 <?php
-
 $pdo = new PDO(
-    "mysql:host=localhost;dbname=db_toko;charset=utf8mb4",
+    "mysql:host=localhost;dbname=db_toko_pulih;charset=utf8mb4",
     "root",
     "",
-    [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]
+    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
 );
 
-// Password baru akun pelanggan
-$passwordBaru = 'Pelanggan123';
+$akun = [
+    ['admin', 'admin123'],
+    ['kasir', 'kasir123'],
+    ['pelanggan', 'pelanggan123']
+];
 
-$hash = password_hash($passwordBaru, PASSWORD_DEFAULT);
+foreach ($akun as $data) {
+    $passwordHash = password_hash($data[1], PASSWORD_DEFAULT);
 
-$stmt = $pdo->prepare("
-    UPDATE users
-    SET password = ?, role = 'pelanggan'
-    WHERE username = 'pelanggan01'
-");
+    $stmt = $pdo->prepare("
+        UPDATE users
+        SET password = ?
+        WHERE username = ?
+    ");
 
-$stmt->execute([$hash]);
+    $stmt->execute([$passwordHash, $data[0]]);
 
-if ($stmt->rowCount() > 0) {
-    echo "Password pelanggan berhasil diperbarui.";
-} else {
-    echo "Tidak ada perubahan. Periksa apakah username pelanggan01 tersedia.";
+    echo "Akun " . htmlspecialchars($data[0]) .
+         ": " . ($stmt->rowCount() > 0 ? "Password diperbarui" : "Periksa akun") .
+         "<br>";
 }
+?>
