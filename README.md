@@ -1,4 +1,4 @@
-# StoreFlow – Sistem Manajemen Toko
+# Tamtoymart– Sistem Manajemen Toko
 
 StoreFlow adalah aplikasi berbasis web untuk membantu mengelola aktivitas toko, mulai dari pengelolaan produk, kategori, pelanggan, transaksi, stok barang, hingga laporan dan riwayat aktivitas.
 
